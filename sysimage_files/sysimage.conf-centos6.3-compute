@@ -1,0 +1,447 @@
+####-----------------------------------------------------------------------####
+# example oneSIS configuration file.
+#
+# This config is more complex than the typical setup.
+# It is trying to show an example of how to use each type of directive.
+#
+# For more information on configuration directives/syntax, refer to the
+# oneSIS Administrator's manual: http://onesis.sourceforge.net/docs.html 
+####-----------------------------------------------------------------------####
+
+####-----------------------------------------------------------------------####
+# DISTRO: <name> <version>                                                    #
+
+# rjh - the -rjh variant adds root on lustre umount hacks to the halt script
+DISTRO: RedHat-EL-6.2-rjh
+
+####-----------------------------------------------------------------------####
+
+####-----------------------------------------------------------------------####
+# INCLUDE: <path>                                                             #
+
+####-----------------------------------------------------------------------####
+
+####-----------------------------------------------------------------------####
+# NODECLASS_REGEXP: <perl_regexp> <CLASS>                                     #
+# NODECLASS_MAP: <NODE> <CLASS>                                               #
+# NODECLASS_RANGE: <prefix[RANGE]...suffix> <CLASS>                           #
+#                  RANGE can be of the form [a-b,x-y,...], where a<b and x<y  #
+
+NODECLASS_REGEXP: v\d+ vu.compute.internal
+NODECLASS_REGEXP: vayu\d+ vu.compute.external.login
+NODECLASS_REGEXP: vayu\d+gige vu.compute.external.login
+NODECLASS_MAP: vayu4 vu.compute.external.login.trawl
+NODECLASS_MAP: vayu4gige vu.compute.external.login.trawl
+NODECLASS_REGEXP: gopher\d+ vu.compute.external.dm
+NODECLASS_REGEXP: gopher\d+gige vu.compute.external.dm
+NODECLASS_MAP: gopher3 vu.compute.external.dm.trawl
+NODECLASS_MAP: gopher3gige vu.compute.external.dm.trawl
+NODECLASS_REGEXP: vu-test vu.compute.internal
+NODECLASS_REGEXP: vu-testgige vu.compute.internal
+NODECLASS_REGEXP: spare\d+ vu.compute.internal
+NODECLASS_RANGE: v[1433-1484] vu.compute.internal.bigmem
+NODECLASS_RANGE: v[1485-1488] vu.compute.internal.hugemem
+NODECLASS_REGEXP: gopher4 vu.compute.internal
+NODECLASS_REGEXP: gopher4gige vu.compute.internal
+NODECLASS_REGEXP: lolza vu.compute.internal
+NODECLASS_REGEXP: lolzagige vu.compute.internal
+
+NODECLASS_REGEXP: x\d+ xe.compute.internal
+NODECLASS_MAP: xe xe.compute.external.login
+NODECLASS_MAP: xe-apps xe.compute.external
+
+NODECLASS_REGEXP: d\d+ dcc.compute.internal
+NODECLASS_MAP: dcc-apps dcc.compute.external
+NODECLASS_MAP: dcc dcc.compute.external.login
+NODECLASS_RANGE: dc-dm[4-14] dcc.compute.external.dm
+
+NODECLASS_REGEXP: r\d+ r.compute.internal
+NODECLASS_REGEXP: r\d+gige r.compute.internal
+NODECLASS_REGEXP: chipmunk\d+ r.compute.external.dm
+NODECLASS_REGEXP: chipmunk\d+gige r.compute.external.dm
+NODECLASS_REGEXP: raijin\d+ r.compute.external.login
+NODECLASS_REGEXP: raijin\d+gige r.compute.external.login
+# apps and backups
+NODECLASS_MAP: raijin7   r.compute.external.login.trawl
+NODECLASS_MAP: chipmunk6 r.compute.external.dm.trawl
+
+# >32g
+NODECLASS_RANGE: r[2396-3520] r.compute.internal.bigmem
+NODECLASS_RANGE: r[3521-3592] r.compute.internal.hugemem
+
+# tmp
+NODECLASS_REGEXP: lemming\d+ r.compute.external.login
+NODECLASS_REGEXP: lemming\d+gige r.compute.external.login
+NODECLASS_REGEXP: gerbil\d+ r.compute.external.login
+NODECLASS_REGEXP: gerbil\d+gige r.compute.external.login
+
+
+####-----------------------------------------------------------------------####
+
+####-----------------------------------------------------------------------####
+# PROPERTY: <propname> [-c CLASS[,CLASS]...] [-n NODE[,NODE]...]              #
+#                      [-r RANGE] [-re REGEXP]                                #
+
+####-----------------------------------------------------------------------####
+
+# vu fc disk jbods
+PROPERTY: fc -r v[1409-1440,1465-1488]
+
+# vu global jobfs on lustre
+PROPERTY: global -r v[1-1200]
+
+## vu lustre lnet routing test clients
+#PROPERTY: lnetclient -r v[1489-1492]
+
+# xe, dcc gpu nodes
+PROPERTY: gpu -r x[1-2,6,11-16] -n d43
+
+# xe 2-disk md jobfs
+PROPERTY: md -r x[104-120]
+
+####-----------------------------------------------------------------------####
+# SERVICE: <name> -c CLASS[,CLASS]... -n NODE[,NODE]...                       #
+
+# iptables firewall script
+SERVICE vayu_firewall -n vayu1,vayu1gige,vayu2,vayu2gige,vayu3,vayu3gige,vayu4,vayu4gige,gopher1,gopher1gige,gopher2,gopher2gige,gopher3,gopher3gige
+#SERVICE gopher4_firewall -n gopher4,gopher4gige
+
+# rsslimiter keeps user login processes under ulimit -m on login node(s)
+SERVICE rsslimiter -c vu.compute.external.login,xe.compute.external.login,r.compute.external.login
+# For rshd (used by fastrcp used by mdss commands) and rsyncd (for backups)
+#SERVICE xinetd -c vu.compute.external
+# For rsyncd (for backups) on gopher3, for gridftp and bbcp on gopher1,2 (hosts that interface)
+SERVICE xinetd -n gopher1,gopher1gige,gopher2,gopher2gige,gopher3,gopher3gige,xe-apps
+# crond is used by the diskspace admin script - run on vu-apps,xe-apps
+SERVICE crond -n vayu4,vayu4gige,xe-apps
+## jobfsd - this needs to be started from rc.local as /opt isn't mounted yet
+#SERVICE jobfs_quotad -n vayu4,vayu4gige
+## samba for Drew - on one dm
+#SERVICE smb -n gopher1,gopher1gige,xe
+# don't run on the flash disks for now...
+SERVICE smartd -c vu.compute.external,xe.compute # -p fc
+# don't run irbalance on the logins/gophers because of irq -1
+SERVICE irqbalance -c vu.compute.internal,xe.compute.internal,r.compute.internal
+# pslogger on active login nodes, dm nodes
+SERVICE pslogger -c vu.compute.external,xe.compute.external,r.compute.external
+# portmap for SMS on active login nodes, nfs on dcc
+SERVICE rpcbind -c dcc.compute -n vayu1,vayu1gige,vayu2,vayu2gige,vayu3,vayu3gige,raijin1,raijin1gige,raijin2,raijin2gige,raijin3,raijin3gige,raijin4,raijin4gige,raijin5,raijin5gige,raijin6,raijin6gige,raijin7,raijin7gige
+
+# iptables firewall script
+SERVICE xe_firewall -n xe,xe-apps
+# nvidia drivers and stuff for gpus
+# "NCI NF nVidia" -> "nfnvidia" -> "nfidia" :)
+# rjh - all gpus disabled - security - Thu Aug  2 22:12:56 EST 2012, reenabled Wed Aug  8 21:04:01 EST 2012
+SERVICE nfidia -p gpu
+# fixme - xe is behind the times. should do it globaly via the IB switch like on vu ->
+# gather ibstats on node
+SERVICE gmond_ibstats -c xe.compute
+# check dimms
+SERVICE memlog -c xe.compute
+
+# nfslock for dcc nodes
+SERVICE nfslock -c dcc.compute
+# multipathd for dcc nodes
+SERVICE multipathd -c dcc.compute
+
+SERVICE raijin_firewall -c r.compute.external
+
+####-----------------------------------------------------------------------####
+
+####-----------------------------------------------------------------------####
+# RAMSIZE: <max_size [k|m|g]> [-c CLASS[,CLASS]...] [-n NODE[,NODE]...]       #
+#                             [-p PROPERTY[,PROPERTY]...]                     #
+
+RAMSIZE: 10m -c vu.compute.internal,xe.compute.internal,dcc.compute.internal,r.compute.internal
+RAMSIZE: 200m -c vu.compute.external,xe.compute.external,dcc.compute.external,r.compute.external
+
+####-----------------------------------------------------------------------####
+
+####-----------------------------------------------------------------------####
+# RAMDIR:  <dir>  [-d] [-p] [-m mode] [-u user] [-g group]                    #
+#                 [-c CLASS[,CLASS]...] [-n NODE[,NODE]...]                   #
+#                 [-p PROPERTY[,PROPERTY]...]                                 #
+# RAMFILE: <file> [-d]      [-m mode] [-u user] [-g group]                    #
+#                 [-c CLASS[,CLASS]...] [-n NODE[,NODE]...]                   #
+#                 [-p PROPERTY[,PROPERTY]...]                                 #
+
+####-----------------------------------------------------------------------####
+
+####-----------------------------------------------------------------------####
+# LINKDIR:  <dir>  [-d] [-p] [-c CLASS[,CLASS]...] [-n NODE[,NODE]...]        #
+#                            [-p PROPERTY[,PROPERTY]...]                      #
+# LINKFILE: <file> [-d]      [-c CLASS[,CLASS]...] [-n NODE[,NODE]...]        #
+#                            [-p PROPERTY[,PROPERTY]...]                      #
+
+####-----------------------------------------------------------------------####
+
+# /var/log's already on ramdisk
+#LINKDIR /var/log/samba
+LINKDIR /var/log/munge
+
+# pretty standard as you'd expect:
+LINKDIR /var/log
+#LINKDIR /var/lock/subsys
+#LINKFILE /var/lib/random-seed -d
+#LINKDIR /tmp
+LINKDIR /var/lib/ntp
+# our clustery things:
+LINKFILE /etc/ganglia/gmond.conf
+
+# nfs stuff - needed for dcc?
+# some of these are 'cos it's an NFS server which may not be needed in the final config:
+#LINKDIR /var/lib/nfs
+#LINKFILE /etc/mtab
+#LINKFILE /etc/mtab~
+#LINKDIR /var/lib/nfs/rpc_pipefs
+#LINKDIR /var/lib/nfs/statd
+# sm needs a chmod to rpcuser.rpcuser, but I don't know how to do that yet:
+#LINKDIR /var/lib/nfs/statd/sm
+# rjh - simpler to just copy it all to ramdisk?
+LINKDIR /var/lib/nfs -d
+
+# for module
+LINKFILE /root/.modulesbeginenv
+
+LINKFILE /var/lib/logrotate.status
+
+LINKDIR /var/run -d
+LINKDIR /var/lock -d
+
+# for centos5
+#LINKFILE /var/empty/sshd/etc/localtime
+LINKFILE /etc/adjtime
+#LINKDIR /etc/lvm
+#LINKFILE /etc/lvm/.cache
+#LINKFILE /etc/lvm/.cache.tmp
+
+# for multipath
+#LINKDIR /var/lib/multipath
+LINKDIR /var/cache/multipathd
+
+LINKDIR /var/lib/munge
+LINKDIR /var/lib/dbus
+
+# for systemtap cache
+LINKDIR /root/.systemtap
+
+# stop vim winging and allow some history
+LINKFILE /root/.viminfo
+LINKFILE /root/.bash_history
+
+# for nscd's caches
+LINKDIR /var/db/nscd
+
+# copy to ramdisk so we can modify it
+LINKFILE /etc/smartd.conf -d -c r.compute.external
+
+####-----------------------------------------------------------------------####
+# LINKBACK: <file|dir> [*] <'CLASS'|'NODE'|target> [-h]                       #
+#           [-c CLASS[,CLASS]...] [-n NODE[,NODE]...]                         #
+#           [-p PROPERTY[,PROPERTY]...]                                       #
+
+# Note the -h here, hide the ifcfg files from network daemon on other nodes
+
+# special sauce for data mover and login nodes
+
+# external interfaces
+# 1GigE links
+LINKBACK /etc/sysconfig/network-scripts/ifcfg-eth1 NODE -h -n vayu4,vayu4gige,xe,xe-apps
+# 10GigE links
+LINKBACK /etc/sysconfig/network-scripts/ifcfg-eth4_192 NODE -h -n vayu1,vayu1gige,vayu2,vayu2gige,vayu3,vayu3gige,gopher1,gopher1gige,gopher2,gopher2gige,gopher3,gopher3gige
+# just to make the vlan eth4 happy:
+LINKBACK /etc/sysconfig/network-scripts/ifcfg-eth4 NODE -h -n vayu1,vayu1gige,vayu2,vayu2gige,vayu3,vayu3gige,gopher1,gopher1gige,gopher2,gopher2gige,gopher3,gopher3gige
+
+# backup external GigE links that aren't up by default
+LINKBACK /etc/sysconfig/network-scripts/ifcfg-eth1 NODE -h -n vayu1,vayu1gige,vayu2,vayu2gige,vayu3,vayu3gige,gopher1,gopher1gige,gopher2,gopher2gige,gopher3,gopher3gige
+
+# vu-apps on vayu4
+LINKBACK /etc/sysconfig/network-scripts/ifcfg-eth1:0 NODE -h -n vayu4,vayu4gige
+
+# xe-gw and xe-gw-ext. normally manually up on xe-apps with xe as failover
+LINKBACK /etc/sysconfig/network-scripts/ifcfg-eth0:0  NODE -h -n xe,xe-apps
+LINKBACK /etc/sysconfig/network-scripts/ifcfg-eth1_12 NODE -h -n xe,xe-apps
+
+# xe login node 10gige LAG - ixgbe eth2,3 make up bond0 which has vlans 192,12
+LINKBACK /etc/sysconfig/network-scripts/ifcfg-eth2      NODE -h -n xe
+LINKBACK /etc/sysconfig/network-scripts/ifcfg-eth3      NODE -h -n xe
+LINKBACK /etc/sysconfig/network-scripts/ifcfg-bond0     NODE -h -n xe,d43
+LINKBACK /etc/sysconfig/network-scripts/ifcfg-bond0_12  NODE -h -n xe
+LINKBACK /etc/sysconfig/network-scripts/ifcfg-bond0_192 NODE -h -n xe
+# dcc huge mem node network interface
+LINKBACK /etc/sysconfig/network-scripts/ifcfg-bond0_4  NODE -h -n d43
+LINKBACK /etc/sysconfig/network-scripts/ifcfg-eth6     NODE -h -n d43
+LINKBACK /etc/sysconfig/network-scripts/ifcfg-eth7     NODE -h -n d43
+
+# vu-gridftp on gopher1
+LINKBACK /etc/sysconfig/network-scripts/ifcfg-eth4_192:0 NODE -h -n gopher1,gopher1gige
+# backup vu-gridftp GigE link that isn't up by default
+LINKBACK /etc/sysconfig/network-scripts/ifcfg-eth1:0 NODE -h -n gopher1,gopher1gige
+
+LINKBACK /etc/sysconfig/network CLASS -c vu.compute.external,xe.compute.external,dcc.compute.external,r.compute.external
+LINKBACK /etc/motd CLASS -c vu.compute.external.login,xe.compute.external.login,dcc.compute.external.login,r.compute.external.login
+# dcc.compute has a name server on dccpbs
+LINKBACK /etc/resolv.conf CLASS -c vu.compute.external,xe.compute.external,dcc.compute.external,dcc.compute,r.compute.external
+
+# make the login, dm node's /tmp be on local disk
+LINKBACK /etc/fstab CLASS -c vu,vu.compute.external,xe.compute,dcc,r,r.compute.external
+# vayu4 is vu-apps
+LINKBACK /etc/fstab NODE -n vayu4,vayu4gige,xe,xe-apps,dcc-apps,raijin7gige,raijin7
+
+# for gridftp
+LINKBACK /etc/grid-security NODE -h -n gopher1,gopher1gige,gopher2,gopher2gige
+
+# arp tweaks for IB-to-GigE router node, mem and min_free_kbytes tweaks
+LINKBACK /etc/sysctl.conf CLASS -c vu,vu.compute.internal.bigmem,vu.compute.external,vu.compute.external.login,vu.compute.external.login.trawl,vu.compute.internal.hugemem,vu.compute.external.dm.trawl,xe,xe.compute.external,xe.compute.external.login,dcc,dcc.compute.external,r,r.compute.external,r.compute.external.login.trawl,r.compute.external.dm.trawl
+
+# just the pbs conf file in the image and everything else on jobfs/flash
+LINKDIR /var/spool/pbs/mom_logs
+# note - the ordering here is important - want properties to trump classes:
+LINKBACK /var/spool/pbs/mom_priv/config CLASS
+LINKBACK /var/spool/pbs/mom_priv/config PROPERTY -p fc,global
+
+# pbs additions for combined image
+LINKBACK /var/spool/pbs/server_name CLASS -c vu,xe,dcc,r
+LINKBACK /etc/init.d/pbs_mom CLASS -c vu,xe,dcc,r
+
+# for qcat, need spool/ and mom_priv/jobs/ to point back to local disk, so tell the image where the real pbs tree is
+LINKBACK /var/spool/pbs/node_pbs_dir CLASS -c vu,xe,dcc,r
+
+# allow different console ttyS
+LINKBACK /sbin/agetty.sh CLASS
+
+## smartd config for fc disks and for login,dm nodes (default)
+#  - use smartGatherFc instead of this.
+#LINKBACK /etc/smartd.conf PROPERTY -p fc
+
+# report md200 i/o stats on fc nodes, flash on the rest.
+# single disk on xe, except for a range with 2 disk md.
+# note - the ordering here is important - want properties to trump classes:
+LINKBACK /etc/ganglia/conf.d/diskstat.pyconf CLASS -c vu.compute.external,vu,xe
+LINKBACK /etc/ganglia/conf.d/diskstat.pyconf PROPERTY -p fc,md
+# xe & junket nodes get cpu temps from bmc
+LINKBACK /etc/ganglia/conf.d/cputemp.pyconf CLASS -c vu
+
+# this makes mk-sysimage very unhappy.
+# needs a /ram/etc/hosts link on the image server to quash it.
+# Josh says they're harmless errs in this case
+LINKBACK /etc/hosts CLASS -c vu,xe,dcc,r
+# however, vu IPoIB rhel6 nodes don't boot with a missing hosts file.
+# later initramfs's include init code and a dhcp client to set the hostname
+
+# sendmail - so can see errors from cronjobs
+LINKDIR /var/spool/clientmqueue -n vayu4,xe-apps,r-apps
+LINKDIR /var/spool/mqueue -n vayu4,xe-apps,r-apps
+
+# partial list of extra files to handle multiple clusters in one image ->
+# ie. these contain something about the cluster's identity
+LINKBACK /etc/nslcd.conf CLASS -c vu,xe,dcc,r
+LINKBACK /etc/openldap/ldap.conf CLASS -c vu,xe,dcc,r
+LINKBACK /etc/pam_ldap.conf CLASS -c vu,xe,dcc,r
+LINKBACK /etc/mail/sendmail.cf CLASS -c vu,xe,r
+LINKBACK /etc/mail/sendmail.mc CLASS -c vu,xe,r
+LINKBACK /etc/mail/submit.cf CLASS -c vu,xe,r
+LINKBACK /etc/mail/submit.mc CLASS -c vu,xe,r
+LINKBACK /etc/ntp.conf CLASS -c vu,xe,dcc,r
+LINKBACK /etc/ntp/step-tickers CLASS -c vu,xe,dcc,r
+LINKBACK /etc/rc.d/rc.local CLASS -c vu,xe,dcc,r
+LINKBACK /etc/rsyslog.conf CLASS -c vu,xe,dcc,r
+LINKBACK /etc/rsyncd.passwd CLASS -c vu,xe,dcc,r
+LINKBACK /etc/securetty CLASS -c vu,xe,dcc,r
+LINKBACK /etc/security/limits.conf CLASS -c vu,xe,r
+LINKBACK /root/.ssh/authorized_keys CLASS -c vu,xe,dcc,r
+LINKBACK /etc/ssh/shosts.equiv CLASS -c vu,xe,dcc,r
+LINKBACK /etc/rsyncd.secrets NODE -n gopher3,xe-apps
+LINKBACK /etc/smartd.conf CLASS -c vu.compute.external,xe
+LINKBACK /etc/modprobe.conf CLASS
+# only for dcc multipath.conf 
+LINKBACK /etc/multipath.conf CLASS -c dcc
+
+## possibly TODO ... not just yet
+#etc/pam.d/system-auth
+#etc/rc.d/init.d/portmap
+#etc/pki/tls/certs/nfcacert.pem
+#etc/openldap/cacerts/...
+#etc/pki/tls/certs/vu-ldap1-slapd-cert.pem
+#var/spool/cron/paw900
+#var/spool/cron/root
+#
+## on dcc
+#etc/ssh/ssh_config
+#etc/ssh/sshd_config
+#etc/ganglia/gmond.conf
+#etc/sysctl.conf
+#
+## on vu,xe?
+#etc/sysconfig/samba
+
+LINKBACK /etc/init.d/jobfs CLASS -c vu,xe
+LINKBACK /etc/init.d/lustre_client CLASS -c vu,xe,r
+LINKBACK /etc/init.d/gmond CLASS -c vu,xe,r
+
+## ok to be identical across clusters?
+#etc/crontab
+#etc/inittab
+#etc/sudoers
+#etc/bashrc
+#etc/csh.cshrc
+#etc/csh.login
+#etc/profile
+#etc/xinetd.d/rsync
+#etc/yum.conf
+#opt/c3-4/cpushimage
+#usr/lib/perl5/site_perl/5.8.8/oneSIS.pm
+#etc/sysconfig/raid-check
+#etc/nscd.conf
+#etc/ofed/openib.conf
+#etc/cron.d/sysstat
+#
+## not important/delete
+#etc/iscsi/iscsid.conf
+
+
+####-----------------------------------------------------------------------####
+
+####-----------------------------------------------------------------------####
+# DISKMOUNT:  <disk> <size[%]> <mointpoint>                                   #
+#             [-c CLASS[,CLASS]...] [-n NODE[,NODE]...]                       #
+#             [-p PROPERTY[,PROPERTY]...]                                     #
+# DISKSWAP: <disk> <size[%]>                                                  #
+#           [-c CLASS[,CLASS]...] [-n NODE[,NODE]...]                         #
+#           [-p PROPERTY[,PROPERTY]...]                                       #
+
+####-----------------------------------------------------------------------####
+
+####-----------------------------------------------------------------------####
+# DEPLOYMOUNT:  <disk> <size[%]> <mointpoint>                                 #
+#               [-c CLASS[,CLASS]...] [-n NODE[,NODE]...]                     #
+#               [-p PROPERTY[,PROPERTY]...]                                   #
+# DEPLOYSWAP: <disk> <size[%]> [-c CLASS[,CLASS]...] [-n NODE[,NODE]...]      #
+#                              [-p PROPERTY[,PROPERTY]...]                    #
+# BOOTLOADER: <grub | lilo>    [-c CLASS[,CLASS]...] [-n NODE[,NODE]...]      #
+#                              [-p PROPERTY[,PROPERTY]...]                    #
+# SYNCDIR:     <path> [-c CLASS[,CLASS]...] [-n NODE[,NODE]...]               #
+#                     [-p PROPERTY[,PROPERTY]...]                             #
+# EXCLUDESYNC: <path> [-c CLASS[,CLASS]...] [-n NODE[,NODE]...]               #
+#                     [-p PROPERTY[,PROPERTY]...]                             #
+
+####-----------------------------------------------------------------------####
+
+####-----------------------------------------------------------------------####
+# ETH_PRELOAD: <driver,[driver]...>                                           #
+# MAC_ADDR: <hostname> <mac_address>                                          #
+
+#ETH_PRELOAD: e1000
+
+####-----------------------------------------------------------------------####
+
+####-----------------------------------------------------------------------####
+# CONSOLECMD: [-c CLASS[,CLASS]...] [-n NODE[,NODE]...]                       #
+#             [-p PROPERTY[,PROPERTY]...] <command>                           #
+# POWERCMD: <function> [-c CLASS[,CLASS]...] [-n NODE[,NODE]...]              #
+#                      [-p PROPERTY[,PROPERTY]...] <command>                  #
+#            function can be: ON,OFF,CYCLE,STATUS,LEDON,LEDOFF,LEDSTATUS      #
+# SPECFORMAT: <spec_id> <format> [HOST:/// | IP:///] [SPEC:///]               #
+#            format can be: hostname,ipaddr,basic_range,ext_range             #
+
+####-----------------------------------------------------------------------####
