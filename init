@@ -1,0 +1,1349 @@
+#!/bin/ash
+# Author: Josh England <jjengla@gmail.com>
+# This script bootstraps oneSIS cluster nodes.
+# Kernel modules are loaded in order from /etc/modules.autoload.
+# Some behavior flags can be set in /etc/initramfs.conf.
+# Any actual initramfss should be created by the mk_initramfs-oneSIS script.
+#
+# Copyright (2004-2007) Josh England, Sandia Corporation.
+# Copyright (2008-2011) Josh England
+# Under the terms of Contract DE-AC04-94AL85000 with Sandia Corporation,
+# the U.S. Government retains certain rights in this software
+#
+#    This file is part of oneSIS (http://onesis.sourceforge.net).
+#
+#    oneSIS is free software; you can redistribute it and/or modify
+#    it under the terms of the GNU General Public License as published by
+#    the Free Software Foundation; either version 2 of the License, or
+#    any later version.
+#
+#    oneSIS is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with oneSIS; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+###############################################################################
+log() {
+# Desc: Runs arguments as a shell command that appends output to /init.log
+    eval $@ 2>&1 |tee -a /init.log
+}
+
+main() {
+    export PATH
+    log echo "oneSIS: Running $0"
+
+    # Mount /proc, /sys, /dev, /dev/pts
+    log mount -n -t proc none /proc
+    log mount -n -t sysfs none /sys
+    log mount -n -t tmpfs none /dev
+    echo /sbin/mdev > /proc/sys/kernel/hotplug
+    log mdev -s
+    log mkdir /dev/pts
+    log mount -n -t devpts -o gid=5,mode=620 none /dev/pts
+
+
+    # Re-mount root readwrite
+    log mount -n -o remount -w /dev/ram0 /
+    
+    # Configure loopback interface
+    log ifconfig lo 127.0.0.1
+    
+    # load lspci modules
+    pcimods=`grep "^[[:space:]]*PCIMODS" /etc/initramfs.conf`
+    if [ -n $pcimods ]; then
+	log echo oneSIS: Loading pci modules
+        lspci | egrep -v 'VGA' | awk '{print $1}' | while read device; do
+            find /sys -name modalias | grep :$device | xargs cat | xargs modprobe 2> /dev/null
+        done
+    fi
+
+#    # sleep here in the pre-boot initramfs for the specified delay=X seconds
+#    # nominally so we can see if the iPXE link is SDR or FDR, but may have other uses?
+#    cmdline=`cat /proc/cmdline |grep delay=`
+#    if [ -n "$cmdline" ]; then
+#        sleep `echo $cmdline|sed -e "s/.* delay=//" -e "s/ .*//"`
+#    fi
+
+    # cluster is specified on the kernel command line
+    cluster=''
+    cmdline=`cat /proc/cmdline |grep cluster=`
+    if [ -n "$cmdline" ]; then
+        cluster=`echo $cmdline|sed -e "s/.* cluster=//" -e "s/ .*//"`
+    fi
+
+    # use a cluster customised modprobe.conf if it exists
+    if [ -r /etc/modprobe.conf.$cluster ]; then
+        cp /etc/modprobe.conf.$cluster /etc/modprobe.conf
+    fi
+
+    # Load modules
+    if [ -r /etc/modules.autoload.$cluster ]; then
+        m=/etc/modules.autoload.$cluster
+    else
+        m=/etc/modules.autoload
+    fi
+    log echo "oneSIS: using $m"
+    for i in `cat $m`; do
+	log modprobe $i;
+        # need to wait when loading usb-storage before moving along
+        if [ $i = "usb-storage" ]; then 
+            log echo "Waiting for usb storage devices to detect ..."
+            sleep 10
+        fi
+    done
+
+    # Create device files for all local disks/partitions
+    for device in `echo $(cat /proc/partitions |grep [0-9] |awk '{print $4}')`; do
+	create_disk_device /dev/$device	
+    done
+
+    # Die if there is no network interface
+    NIC=`ifconfig -a | egrep 'eth|ib'`
+    if [ -z "$NIC" ]; then
+	log echo
+	log echo "oneSIS: Error! Failed to install a network driver module!"
+	log echo "\*\ \ \*\ \ \* Dropping to a shell..."
+	/bin/ash 2>&1
+	exit 1
+    fi
+
+    # Check if the ramdisk should be used as the root filesystem
+    ramroot=`grep "^[[:space:]]*RAMDISK_ROOT" /etc/initramfs.conf`
+
+    # Check if we should try rebooting should a retry fail for nfs/dhcp/network check
+    retry_reboot=`grep "^[[:space:]]*RETRY_REBOOT" /etc/initramfs.conf`
+
+    # rjh: if we have a command line rsyncroot argument then we are implicitly doing ramroot 
+    # so override any /etc/initramfs.conf setting.
+    cmdline=`cat /proc/cmdline |grep rsyncroot=`
+    if [ -n "$cmdline" ]; then
+        ramroot="yes"
+    fi
+
+    gotipinfo=0
+    #
+    # if you use ipappend 3 using pxelinux.0 ... 
+    #
+    # Check if we see the ip information in the command line
+    # ip=<client-ip>:<boot-server-ip>:<gw-ip>:<netmask>
+    #
+    # eg. no gateway set in dhcp:
+    #    ip=10.1.16.49:10.1.101.241:0.0.0.0:255.255.0.0
+    cmdline=`cat /proc/cmdline | grep ip=`
+    if [ -n "$cmdline" ]; then
+	gotipinfo=1
+	myipinfo=`echo $cmdline|sed -e "s/.* ip=//" -e "s/ .*//"`
+	IPADDR=`echo $myipinfo |cut -d : -f 1`
+	mybootip=`echo $myipinfo |cut -d : -f 2`
+	GATEWAY=`echo $myipinfo |cut -d : -f 3`
+	NETMASK=`echo $myipinfo |cut -d : -f 4`
+    fi
+    # Check for a hardware identifier on the command line.
+    # BOOTIF = <HWTYPE>-<HWID>
+    # For Ethernet, HWID is the MAC address of the boot interface.
+    if grep -q BOOTIF= /proc/cmdline; then
+	BOOTIF=`cat /proc/cmdline | sed -e 's/.*BOOTIF=//' -e 's/ .*//'`
+	HWTYPE=`echo $BOOTIF | sed 's/-.*//'`
+	HWID=`echo $BOOTIF | sed 's/^..//' | sed 's/^-//'`
+
+	# Ethernet
+	if [ "x${HWTYPE}" = "x01" ]; then
+	    mybootmac=`echo $HWID | sed -e "s/-/:/g"`
+	    INTERFACE=`ifconfig -a | grep -i $mybootmac | awk '{print $1}'`
+
+	# Infiniband
+	elif [ "x${HWTYPE}" = "x20" ]; then
+	    # The current Mellanox BoIB implementation doesn't provide a
+	    # GUID or any other type of identifier, so we default to ib0.
+	    # This will hopefully change in the future.
+	    INTERFACE=ib0
+	    IPOIB_MODE=datagram
+	    #IPOIB_MODE=connected
+	    if [ $IPOIB_MODE = "connected" ] ; then
+		MTU=65520
+	    fi
+
+	# Unknown hardware type
+	else
+	    log echo "oneSIS: Error! Unknown boot interface hardware type ($HWTYPE)!"
+	    gotipinfo=0
+	fi
+    else
+	# we don't have enough data for the interface
+	gotipinfo=0
+        log echo "oneSIS: rjh: bugger"
+    fi
+
+        log echo "oneSIS: rjh: 1 hostname"
+	log hostname
+
+    # Check if DHCP should not be run
+    nodhcp=`grep "^[[:space:]]*NODHCP" /etc/initramfs.conf`
+    if [ -n "$nodhcp" -a $gotipinfo -ne 1 ]; then
+	log echo "oneSIS: Notice! DHCP has been configured not to run."
+    else
+	if [ $gotipinfo -eq 1 ]; then
+	    gotdhcp=1
+	else
+	    gotdhcp=0
+            # Configure an interface via DHCP
+	    dhcp_retries=`grep -E "^[[:space:]]*DHCP_RETRIES:?[[:space:]]+[[:digit:]]+[[:space:]]*$" /etc/initramfs.conf |awk '{print $2}' |tail -n 1`
+	    dhcp_interface=`grep -E "^[[:space:]]*DHCP_INTERFACE:?[[:space:]]+([[:alnum:]]+[[:space:]]*)+$" /etc/initramfs.conf |awk '{print $2}' |sort -u`
+	    if [ -z "$dhcp_retries" ]; then
+		dhcp_retries=5
+	    fi
+	    if [ -n "$dhcp_interface" ]; then
+		interfaces=$dhcp_interface
+	    else
+		interfaces=`echo $(ifconfig -a |grep "^[a-z]" |grep -E -v 'lo|bond' |awk '{print $1}')`
+	    fi
+	    
+            # Check if DHCP query has results
+	    for interface in $interfaces; do
+		log echo Attempting DHCP on $interface ...
+		if [ $dhcp_retries == 0 ]; then
+		    log udhcpc -i $interface -q 
+		else
+		    log udhcpc -i $interface -n -t $dhcp_retries -q 
+		fi
+		if [ -f /etc/$interface.info ]; then	    
+	        # Put DHCP info into environment vars
+		    . /etc/$interface.info
+		    gotdhcp=1
+		    break;
+		fi
+	    done
+	fi	
+	if [ $gotdhcp = 1 ]; then
+  	    # Set up the network
+	    if [ -n "$NETMASK" ]; then
+		NETMASK_ARG="netmask $NETMASK"
+	    fi
+	    if [ -n "$BROADCAST" ]; then
+		BROADCAST_ARG="broadcast $BROADCAST"
+	    fi
+	    if [ -n "$MTU" ]; then
+		MTU_ARG="mtu $MTU"
+	    fi
+
+	    # Configure bonding interface if requested
+	    bond_ifs=`grep -E "^[[:space:]]*BOND_INTERFACES:?[[:space:]]+[[:alnum:]]+[[:space:]]*[[:alnum:]]+" /etc/initramfs.conf |sed "s/.*:[[:space:]]\+//"`
+	    if [ -n "$bond_ifs" ]; then
+		bonding_loaded=`lsmod |grep bonding`
+		if [ -n "$bonding_loaded" ]; then 
+		    log echo "oneSIS: Bonding interfaces: $bond_ifs"
+		    INTERFACE=bond0
+		else
+		    log echo "oneSIS: Error! Bonding requested but bonding driver is not present!"
+		    log echo "\*\ \ \*\ \ \* Try adding '-w bonding' to your mk-initramfs-oneSIS command"
+		    log echo "\*\ \ \*\ \ \* Continuing without bonding..."
+		fi
+	    fi
+
+	    # Set the IPoIB mode (Infiniband)
+	    if [ "x${HWTYPE}" = "x20" -a -n "$IPOIB_MODE" ]; then
+		if [ -e /sys/class/net/$INTERFACE/mode ] ; then
+		    log echo "oneSIS: Setting $INTERFACE mode to: $IPOIB_MODE"
+		    echo "$IPOIB_MODE" > /sys/class/net/$INTERFACE/mode
+		    if [ $? -ne 0 ] ; then
+			log echo "oneSIS: Warning! Couldn't set IPoIB mode to '$MODE' for $INTERFACE!"
+		    fi
+		else
+		    log echo "oneSIS: Warning! No IPoIB \"mode\" file was found for $INTERFACE in sysfs!"
+		fi
+	    fi
+
+	    # Set a preliminary node description (Infiniband)
+	    if [ "x${HWTYPE}" = "x20" ]; then
+		for hcadir in /sys/class/infiniband/* ; do
+		    echo -n "$IPADDR (oneSIS)" >> $hcadir/node_desc
+		    if [ $? -ne 0 ] ; then
+			log echo "oneSIS: Warning! Failed to set IB node description (node_desc)!"
+		    fi
+		done
+	    fi
+
+	    # Bring up the interface
+	    if [ -n "$INTERFACE" ]; then
+		log echo "oneSIS: Setting IP address on $INTERFACE: $IPADDR"
+		log ifconfig $INTERFACE $IPADDR $NETMASK_ARG $BROADCAST_ARG $MTU_ARG
+		# Ping our own interface (seems to wake things up in some cases)
+		ping -c1 $IPADDR >/dev/null 2>&1
+	    else
+		log echo "oneSIS: Error! Failed to configure a network interface!"
+		log echo "\*\ \ \*\ \ \* Dropping to a shell..."
+		/bin/ash 2>&1
+		exit 1
+	    fi
+
+	    # Finish configuring bonding interface if requested
+	    if [ -n "$bond_ifs" ]; then
+		if [ -n "$bonding_loaded" ]; then
+		    for if in $bond_ifs; do
+			ifenslave bond0 $if
+		    done
+		fi
+	    fi
+
+	    # Configure the gateway
+	    if [ -n "$GATEWAY" ]; then
+		log echo "oneSIS: Setting default route: $GATEWAY"
+		log route add -net 0.0.0.0 gw $GATEWAY
+	    else
+		log echo "oneSIS: Warning! DHCP offered no gateway: no default route set"
+	    fi
+	    
+            # Set the hostname
+	    if [ $gotipinfo -ne 1 ]; then
+    		if [ -n "$HOSTNAME" ]; then
+		    log echo "oneSIS: Setting hostname: $HOSTNAME"
+		    log hostname $HOSTNAME
+		else
+		    log echo "oneSIS: Warning! DHCP offered no hostname."
+		fi
+	    fi
+	else
+	    log echo "oneSIS: Warning! Failed to contact DHCP server!"
+	    if [ -n "$retry_reboot" ]; then
+	    	log echo "oneSIS: Attempting to reboot system and try again"
+	    	sleep 3
+		echo b > /proc/sysrq-trigger
+		log echo "oneSIS: Error! Failed to reboot node"
+		log echo "\*\ \ \*\ \ \* Dropping to a shell..."
+		/bin/ash 2>&1
+		exit 1
+	    fi
+	fi
+    fi
+
+    # rjh added dhcp client to find host-name if booting over IB
+    if [ -z "$HOSTNAME" ]; then
+        log echo "oneSIS: rjh: 1a hostname"
+        log hostname
+        # NOTE  - the below does not change IP or anything else on ib0 (set above) because the dhclient-script is not present
+        #       - this is purely an ugly ugly hack to find the hostname
+        # NOTE2 - need to pass IPADDR as dhclient can get the wrong IP/hostname in reply!! so there's a re-try loop until it gives us the right one
+        if [ "x${HWTYPE}" = "x20" ]; then
+           log sethostname_with_dhclient.rjh $IPADDR
+        else
+           log sethostname_with_dhclient.rjh.eth0 $IPADDR
+        fi
+        log echo "oneSIS: rjh: 1b hostname"
+        log hostname
+    fi
+
+    # all IB modules modules must must have been loaded before now... eg.
+    #    for f in ib_mthca ib_ipoib ib_uverbs ib_umad rdma_cm; do modprobe $f; done
+    # which loads
+    #    rdma_cm iw_cm ib_addr ib_umad ib_uverbs ib_ipoib ib_cm ib_sa ib_mthca ib_mad ib_core
+
+    # rjh - NASTY NASTY hacks to configure IB interface from the GigE address
+    if [ "$cluster" = "vu" ]; then 
+	if [ $INTERFACE != "ib0" ]; then
+	    # configure ib0
+	    ib0ip=`ifconfig eth0 | grep 'inet addr:' | sed -e "s/.*inet addr://" -e "s/ .*//" -e "s/^10.2./10.1./"`
+	    log echo "oneSIS: rjh: cluster $cluster : ib0 ip is $ib0ip"
+	    ifconfig ib0 $ib0ip netmask 255.255.0.0 broadcast 10.1.255.255 mtu 1500
+	    # enable connected mode IPoIB
+	    #echo connected > /sys/class/net/ib0/mode
+	fi
+    elif [ "$cluster" = "xe" ]; then
+	if [ $INTERFACE != "ib0" ]; then
+	    # configure ib0
+	    ib0ip=`ifconfig eth0 | grep 'inet addr:' | sed -e "s/.*inet addr://" -e "s/ .*//" -e "s/^10.7.10./10.8.30./"`
+	    log echo "oneSIS: rjh: cluster $cluster : ib0 ip is $ib0ip"
+	    ifconfig ib0 $ib0ip netmask 255.255.255.0 broadcast 10.8.30.255 mtu 1500
+	    # enable connected mode IPoIB
+	    #echo connected > /sys/class/net/ib0/mode
+	fi
+    elif [ "$cluster" = "alkindi" ]; then
+        if [ $INTERFACE != "ib0" ]; then
+            # configure ib0
+            ib0ip=`ifconfig eth0 | grep 'inet addr:' | sed -e "s/.*inet addr://" -e "s/ .*//" -e "s/^10.140.98./10.140.104./"`
+            log echo "oneSIS: rjh: cluster $cluster : ib0 ip is $ib0ip"
+            ifconfig ib0 $ib0ip netmask 255.255.255.0 broadcast 10.140.104.255 mtu 1500
+            # enable connected mode IPoIB
+            #echo connected > /sys/class/net/ib0/mode
+        fi
+    elif [ "$cluster" = "r" ]; then
+        if [ $INTERFACE != "ib0" ]; then
+            # configure ib0
+            ib0ip=`ifconfig eth0 | grep 'inet addr:' | sed -e "s/.*inet addr://" -e "s/ .*//" -e "s/^10.10./10.9./"`
+            log echo "oneSIS: rjh: cluster $cluster : ib0 ip is $ib0ip"
+            ifconfig ib0 $ib0ip netmask 255.255.0.0 broadcast 10.9.255.255 mtu 1500
+            # enable connected mode IPoIB
+            #echo connected > /sys/class/net/ib0/mode
+        fi
+    else
+	log echo "oneSIS: WARNING: unknown cluster $cluster - ib0 or similar interface is NOT being configured from the boot/GigE interface dhcp settings"
+    fi
+
+    log echo "oneSIS: rjh: 2a hostname"
+    log hostname
+    log echo "oneSIS: rjh: 2b HOSTNAME"
+    log $HOSTNAME
+
+#    if [ "$HOSTNAME" = "" ]; then
+#	log echo "oneSIS: rjh: 2c - no hostname set. dropping to shell\n"
+#        /bin/ash 2>&1
+#        exit 1
+#    fi
+
+    # Attempt to resume from software suspend if requested
+    resume_from=`grep -E "^[[:space:]]*RESUME_FROM:?[[:space:]]+[^[:space:]]+[[:space:]]*$" /etc/initramfs.conf |awk '{print $2}' |tail -n 1`
+    if [ -n "$resume_from" ]; then
+	resume_from=${resume_from##/dev/}
+	resume_dev=`cat /proc/partitions |grep "${resume_from}$" |awk '{print $1 ":" $2}'`
+	if [ -n "$resume_dev" ]; then
+	    log echo "oneSIS: Resuming from software suspend partition: $resume_from"
+	    echo
+	    echo $resume_dev > /sys/power/resume
+	    log echo "oneSIS: Warning! Resume from device failed: $resume_from"
+	    log echo "\*\ \ \*\ \ \* Continuing with normal boot..."
+	else
+	    log echo "oneSIS: Warning! Resume attempted from non-existing device: $resume_from"
+	    log echo "\*\ \ \*\ \ \* Continuing with normal boot..."
+	fi
+    fi
+
+    # If we use ipappend option, we need to let the server relax here
+    if [ $gotipinfo -eq 1 ]; then
+	sleep 3
+    fi
+
+    # Check for network connectivity
+    if [ -n "$GATEWAY" ]; then
+	network_check=`grep -E "^[[:space:]]*NETWORK_CHECK:?[[:space:]]+[[:digit:]]+[[:space:]]*$" /etc/initramfs.conf |awk '{print $2}' |tail -n 1`
+	if [ -z "$network_check" ]; then
+	    network_check=5
+	fi
+	for i in `seq $network_check`; do
+	    log echo "oneSIS: Checking network connectivity to $GATEWAY"
+	    ping -c1 $GATEWAY >/dev/null 2>&1
+	    ret=$?
+	    if [ $ret -eq 0 ]; then
+		break
+	    fi
+	    sleep 2
+	done
+	if [ $ret -ne 0 ]; then
+	    log echo
+	    log echo "oneSIS: Error! Failed network connectivity test\(s\) to $GATEWAY!"
+	    if [ -n "$retry_reboot" ]; then
+		log echo "oneSIS: Attempting to reboot system and try again"
+		sleep 3
+		echo b > /proc/sysrq-trigger
+		log echo "oneSIS: Error! Failed to reboot node"
+		log echo "\*\ \ \*\ \ \* Dropping to a shell..."
+		/bin/ash 2>&1
+		exit 1
+	    fi
+	    log echo "\*\ \ \*\ \ \* Dropping to a shell..."
+	    /bin/ash 2>&1
+	    exit 1
+	fi
+    fi
+
+    # Run user-supplied script if it exists
+    if [ -e /etc/oneSIS/initramfs-postnetcheck.sh ]; then
+	/etc/oneSIS/initramfs-postnetcheck.sh
+    fi
+
+    cmdline=`cat /proc/cmdline |grep rsyncmodules=`
+    if [ -n "$cmdline" ]; then
+        rsyncmodules=`echo $cmdline|sed -e "s/.* rsyncmodules=//" -e "s/ .*//"`
+
+        # see if we're doing rsync:// with a secret
+        RSYNC_PW_OPT=""
+        cmdline=`echo $rsyncmodules | grep "rsync://"`
+        if [ -n "$cmdline" ]; then
+            if [ -r /etc/rsyncd.passwd.$cluster ]; then
+                RSYNC_PW_OPT="--password-file=/etc/rsyncd.passwd.$cluster"
+            elif [ -r /etc/rsyncd.passwd ]; then
+                RSYNC_PW_OPT="--password-file=/etc/rsyncd.passwd"
+            else
+                log echo "oneSIS: Error! rsyncmodules rsync:// but failed to find a rsyncd.passwd file."
+                log echo "\*\ \ \*\ \ \* Dropping to a shell..."
+                /bin/ash 2>&1
+            fi
+        fi
+
+        log echo "oneSIS: rjh: rsync modules is $rsyncmodules"
+        check_host_up $rsyncmodules 20
+
+        log echo "oneSIS: rjh: slurp over the lustre modules that don't fit in 2.6.18's initramfs"
+        log mkdir -p /lib/modules/`uname -r`/kernel/net/lustre/
+        log mkdir -p /lib/modules/`uname -r`/kernel/fs/lustre/
+        log rsync -axH $RSYNC_PW_OPT --stats --exclude=init.log --delete $rsyncmodules/lib/modules/`uname -r`/kernel/net/lustre/ /lib/modules/`uname -r`/kernel/net/lustre/
+        log rsync -axH $RSYNC_PW_OPT --stats --exclude=init.log --delete $rsyncmodules/lib/modules/`uname -r`/kernel/fs/lustre/  /lib/modules/`uname -r`/kernel/fs/lustre/
+    fi
+
+    # optionally set the clock back X hours into the past
+    # this is a workaround to allow the MDS to be rebooted within ~12hrs of a node boot
+    cmdline=`cat /proc/cmdline |grep timeshift=`
+    if [ -n "$cmdline" ]; then
+        hrs=`echo $cmdline|sed -e "s/.* timeshift=//" -e "s/ .*//"`
+        log echo "oneSIS: rjh: timeshift is $hrs"
+
+        log date.glibc
+        #log ntp
+        #ntpdate 10.1.101.241
+
+        let t=`date.glibc +%s`-$(($hrs*3600))
+        log date.glibc
+        date.glibc -s @$t
+    fi
+
+    cmdline=`cat /proc/cmdline |grep lustreroot=`
+    if [ -n "$cmdline" ]; then
+        # Jump to Lustre root filesystem
+        lustreroot=`echo $cmdline|sed -e "s/.* lustreroot=//" -e "s/ .*//"`
+        log echo "oneSIS: rjh: lustre root is $lustreroot"
+
+        # lustre modules
+        for i in `cat /etc/modules.autoload.lustre`; do
+            log modprobe $i;
+        done
+
+        # rjh - the format of lustreroot is eg.
+        #    IP@o2ib:/short/system/images/centos-5.2
+        #  or
+        #    IPa@o2ib:IPb@o2ib:/system/images/centos-5.2
+        #
+        # which breaks down to eg.
+        #    lustreserver = IPa@o2ib:IPb@o2ib
+        #    lustrefs     = system
+        #    lustrepath   = images/centos-5.2
+
+        lustreserver=`echo $lustreroot | cut -d/ -f1`
+        lustrefs=`echo $lustreroot | cut -d/ -f2`
+        lustrepath=`echo $lustreroot | cut -d/ -f3-`
+
+        log echo "oneSIS: rjh: lustreserver $lustreserver"
+        log echo "oneSIS: rjh: lustrefs $lustrefs"
+        log echo "oneSIS: rjh: lustrepath $lustrepath"
+
+        check_host_up `echo $lustreserver | cut -d@ -f1` 20
+
+        log /sbin/mount.lustre -o ro,localflock $lustreserver/$lustrefs /lustremnt
+
+        # let lustre settle
+        log echo "oneSIS: rjh: let lustre mount settle"
+        log sleep 5
+
+        if [ "$cluster" = "r" ]; then
+	    realRoot=/plush/dugong
+	else
+	    realRoot=/whenSquirrels/attack
+	fi
+
+        # hide root mountpoint a few levels down to avoid a stat of '/' finding the lustre fs.
+        log echo "oneSIS: rjh: realRoot $realRoot"
+        mntRealRoot=/mnt$realRoot
+        rsyncArgs=-axHS
+
+        cmdline=`cat /proc/cmdline | grep " halfroot "`
+        if [ -n "$cmdline" ]; then
+            log echo "oneSIS: rjh: half and half root"
+            # switch_root insists that the new root fs be a different fs, so make it a ramfs
+            log mount -t ramfs none /mnt
+            mkdir -p $mntRealRoot
+
+            # mount, and bind to the lustrepath sub-directory
+            mount --bind /lustremnt/$lustrepath $mntRealRoot
+            mount -o remount,ro $mntRealRoot
+
+            # make all the OS nosuid except /usr/bin (and what we copy into the ramdisk)
+            cmdline=`cat /proc/cmdline | grep " nosuid "`
+            if [ -n "$cmdline" ]; then
+                log echo "oneSIS: rjh: root nosuid and /usr/bin bind mounted suid"
+                mount -o remount,nosuid,nodev $mntRealRoot
+                mount --bind $mntRealRoot/usr/bin $mntRealRoot/usr/bin
+                mount -o remount,suid $mntRealRoot/usr/bin
+            fi
+
+            log echo "oneSIS: rjh: mounting lustre root on $mntRealRoot"
+
+            # approx whole list:
+            #   apps bin boot dev etc home initrd jobfs lib lib64 log media mnt opt opt-system proc ram root sbin selinux short srv sys system tmp usr var
+
+            # maybe rsync over some whole dirs later, but for now just make mostly stub dirs
+            log rsync -dplxH $mntRealRoot/ /mnt/
+
+            # make dev a real copy of the lustre stub dir
+            log rsync $rsyncArgs $mntRealRoot/dev/ /mnt/dev/
+
+            # make a real copy of mountpoint dirs
+            log rsync $rsyncArgs $mntRealRoot/mnt/ /mnt/mnt/
+            log rsync $rsyncArgs $mntRealRoot/jobfs/ /mnt/jobfs/
+            log rsync $rsyncArgs $mntRealRoot/data/ /mnt/data/
+
+	    cmdline=`cat /proc/cmdline | grep " allcopy "`
+	    if [ -n "$cmdline" ]; then
+              # rsync over everything from the mount into the ramdisk...
+		log echo doing an allcopy... you can umount lustre later.
+
+		# copy over ~all dirs
+		for f in var lib64 sbin etc bin opt-system root boot opt; do
+		    echo $f
+		    log rsync $rsyncArgs $mntRealRoot/$f/ /mnt/$f/
+		done
+		# usr
+		log echo usr
+		log rsync $rsyncArgs --exclude=/share/doc/ $mntRealRoot/usr/ /mnt/usr/
+		# lib
+		log echo lib
+		log rsync $rsyncArgs --exclude=/modules/ $mntRealRoot/lib/ /mnt/lib/
+		mkdir -p /mnt/lib/modules/`uname -r`
+		log echo lib modules
+		log rsync $rsyncArgs $mntRealRoot/lib/modules/`uname -r`/ /mnt/lib/modules/`uname -r`/
+
+	    elif [ -n "`cat /proc/cmdline | grep ' somecopy '`" ]; then
+		log echo doing a programmed copy of some dirs
+		for f in opt etc root bin lib usr sbin lib64 var boot opt-system data; do
+                    cmdline=`cat /proc/cmdline | grep " do-$f "`
+                    if [ -n "$cmdline" ]; then
+                      # rsync over, with special cases for usr, lib as they are huge
+                        log echo copy $f
+                        if [ $f = "usr" ]; then
+                            log rsync $rsyncArgs --exclude=/share/doc/ $mntRealRoot/usr/ /mnt/usr/
+                            rmdir /mnt/usr/share/doc
+                            ln -s $realRoot/usr/share/doc /mnt/usr/share/doc
+                        elif [ $f = "lib" ]; then
+                            log rsync $rsyncArgs --exclude=/modules/ $mntRealRoot/lib/ /mnt/lib/
+                            mkdir -p /mnt/lib/modules/`uname -r`
+                            log rsync $rsyncArgs $mntRealRoot/lib/modules/`uname -r`/ /mnt/lib/modules/`uname -r`/
+                        else
+		            log rsync $rsyncArgs $mntRealRoot/$f/ /mnt/$f/
+                        fi
+                    else
+                      # symlink
+                        rmdir /mnt/$f
+                        ln -s $realRoot/$f /mnt/$f
+                    fi
+                done
+            else
+		# copy over some dirs
+		for f in lib64 bin sbin; do
+		    echo $f
+		    log rsync $rsyncArgs $mntRealRoot/$f/ /mnt/$f/
+		done
+                #echo usr
+                #log rsync $rsyncArgs --exclude=/share/doc/ $mntRealRoot/usr/ /mnt/usr/
+                ##rmdir /mnt/usr/share/doc
+                ##ln -s $realRoot/usr/share/doc /mnt/usr/share/doc
+                #echo lib
+                #log rsync $rsyncArgs --exclude=/modules/ $mntRealRoot/lib/ /mnt/lib/
+                #mkdir -p /mnt/lib/modules/`uname -r`
+                #log rsync $rsyncArgs $mntRealRoot/lib/modules/`uname -r`/ /mnt/lib/modules/`uname -r`/
+
+		# many of them are mountpoints.
+		# make the non-zero content dirs symlinks to the real dirs on lustre:
+		for f in root usr lib etc var boot opt-system; do
+		    rmdir /mnt/$f
+		    ln -s $realRoot/$f /mnt/$f
+		done
+	    fi
+
+            ## umount and re-mount to flush the caches from the rsync...
+            ##    -- doesn't help...
+            #log echo "umount and re-mount -- start"
+            #log echo df
+            #log df
+            #log echo umounts
+            #log umount $mntRealRoot
+            #log umount /lustremnt
+            #log echo df
+            #log df
+            #log echo mount
+            #log mount
+            #log echo cat /etc/mtab
+            #log cat /etc/mtab
+            #log echo rm /etc/mtab
+            #log rm -f /etc/mtab
+            #log echo touch /etc/mtab
+            #log touch /etc/mtab
+            #log ls -l /etc/mtab
+            #log /sbin/mount.lustre -o ro,localflock $lustreserver/$lustrefs /lustremnt
+            #log mount --bind /lustremnt/$lustrepath $mntRealRoot
+            #log mount -o remount,ro $mntRealRoot
+            #log echo "umount and re-mount -- end"
+
+            log df
+            log ls -l mnt
+        else
+            # mount, and bind to the lustrepath sub-directory
+            log echo "oneSIS: rjh: mounting lustre root on /mnt"
+            mount --bind /lustremnt/$lustrepath /mnt
+            mount -o remount,ro /mnt
+        fi
+
+        cmdline=`cat /proc/cmdline | grep bindopt`
+        if [ -n "$cmdline" ]; then
+            log echo "oneSIS: rjh: read-only bind mount of /opt"
+            # read-only /opt on lustre
+            # opt must to be on the same lustre fs as the system images. ie.
+            #   blah:/blah/{images,opt}
+
+            opt="opt"
+            cmdline=`cat /proc/cmdline | grep bindopt=`
+            if [ -n "$cmdline" ]; then
+               # see if there's a bindopt=opt6 or similar
+               opt=`echo $cmdline|sed -e "s/.* bindopt=//" -e "s/ .*//"`
+               log echo "oneSIS: rjh: opt is $opt"
+            fi
+            mount --bind /lustremnt/$opt /mnt/opt
+            mount -o remount,ro /mnt/opt
+        fi
+
+        umount /lustremnt
+
+        cmdline=`cat /proc/cmdline |grep appsroot=`
+        if [ -n "$cmdline" ]; then
+            appsroot=`echo $cmdline|sed -e "s/.* appsroot=//" -e "s/ .*//"`
+            log echo "oneSIS: rjh: apps root is $appsroot"
+
+
+            # shorthand appsroot would be just appsroot=apps which means
+            #   IPa@o2ib:IPb@o2ib:/apps
+            # longhand appsroot would be
+            #   IPa@o2ib:IPb@o2ib:/short/system/apps
+            # which needs full parsing as per lustreroot above
+            if [ -z "`echo $appsroot | grep :`" ]; then
+	    # if appsmount has no ':' then lustre server is the same as for lustreroot
+                log /sbin/mount.lustre -o ro $lustreserver/$appsroot /mnt/apps
+            else
+		appsserver=`echo $appsroot | cut -d/ -f1`
+		appsfs=`echo $appsroot | cut -d/ -f2`
+		appspath=`echo $appsroot | cut -d/ -f3-`
+
+                check_host_up $appsserver 20
+
+		log /sbin/mount.lustre -o ro $appsserver/$appsfs /lustremnt
+		mount --bind /lustremnt/$appspath /mnt/apps
+		mount -o remount,ro /lustremnt/$appspath /mnt/apps
+		umount /lustremnt
+            fi
+        fi
+
+        log echo "oneSIS: rjh: df"
+        log df
+        log echo "oneSIS: rjh: mount"
+        log mount
+        log echo "oneSIS: rjh: ..."
+        log echo "oneSIS: rjh: ..."
+    else
+
+
+    # Jump to NFS or ramdisk root filesystem
+    if [ -z "$ramroot" ]; then
+    # Determine whether the root is specified by an NFS IP:path pair,
+    # a disk device name, or a disklabel
+
+log echo rjh in not ramroot
+
+	if [ -n "$ROOTPATH" ]; then
+        # root filesystem is specified by DHCP
+	    myroot=$ROOTPATH
+log echo rjh root in dhcp is $myroot
+	else
+        # A 'root=' parameter must be specified on the kernel command line
+	    cmdline=`cat /proc/cmdline |grep root=`
+	    if [ -n "$cmdline" ]; then
+		myroot=`echo $cmdline|sed -e "s/.* root=//" -e "s/ .*//"`
+	    fi
+log echo rjh root on cmd line is $myroot
+	fi
+
+        # Mount the root filesystem
+        # -- can be an NFS IP:dir, path to a block device (ie: /dev/sda1),
+        #    or a disklabel (ie: LABEL=/)
+	dev=`echo $myroot |grep "^/dev/"`
+	label=`echo $myroot |grep LABEL=`
+	nfs=`echo $myroot |grep "^[0-9]\+\.[0-9]\+\.[0-9]\+\.[0-9]\+:.*"`
+	dir=`echo $myroot |grep "^/"`
+	img=`echo $myroot |grep "\.img"`
+log echo rjh nfs $nfs dir $dir img $img dev $dev label $label
+	if [ -n "$label" ]; then
+        # Mount local root filesystem via disklabel.
+	    mount_local_root $label
+	elif [ -n "$dev" ]; then
+        # Mount local root filesystem from specified device.
+	    mount_local_root $dev	
+	elif [ -n "$img" ]; then
+	    mkdir -p /.squashfs.media
+
+	    # try cd mount, then try to look for a usb device to mount
+	    mount /dev/sr0 /.squashfs.media
+	    if [ $? -ne 0 ]; then
+	    	# wait 10 seconds for usb devices to get detected
+	        usbdev=`cat /proc/partitions | awk '{print $4}' | grep sd[a-z]$ | sed -e 's/^/\/dev\//g' | xargs fdisk -l | grep Hidden | awk '{print $1}'`
+	        mount $usbdev /.squashfs.media
+	    fi
+
+	    mount_squashfs_root /.squashfs.media/$img
+	elif [ -n "$nfs" -o -n "$dir" ]; then
+        # If rootpath contains no IP, assume the IP of the DHCP server
+	    if [ -n "$dir" ]; then
+		log echo "oneSIS: Warning! No IP address was specified in the NFS root path"
+		log echo "\*\  \*\  \* We'll assume the DHCP server is also the NFS server"
+		myroot="$DHCP_SERVER:$myroot"
+	    fi
+
+            # Mount NFS root filesystem.
+	    NFS_IP=`echo $myroot |cut -d : -f 1`
+	    NFS_DIR_OPTIONS=`echo $myroot |cut -d : -f 2`
+	    NFS_DIR=`echo $NFS_DIR_OPTIONS |sed "s/\([^,]*\).*/\1/"`
+	    NFS_OPTIONS=`echo $NFS_DIR_OPTIONS |sed "s/[^,]*,\?\(.*\)/\1/"`
+	    NFS_OPTIONS=`echo $NFS_OPTIONS |sed "s/v3/nfsvers=3/"`
+	    nfs_retries=`grep -E "^[[:space:]]*NFS_RETRIES:?[[:space:]]+[[:alnum:]]+[[:space:]]*$" /etc/initramfs.conf |awk '{print $2}' |tail -n 1`
+	    if [ -z "$nfs_retries" ]; then
+		nfs_retries=5
+	    fi
+
+log echo rjh NFS_IP $NFS_IP NFS_DIR $NFS_DIR NFS_OPTIONS $NFS_OPTIONS
+
+	    # Do the mount
+	    for i in `seq $nfs_retries`; do
+		log echo "oneSIS: Mounting NFS root filesystem: ${NFS_DIR} from ${NFS_IP}"
+		mount -n -t nfs -o ro,nolock,$NFS_OPTIONS $NFS_IP:$NFS_DIR /mnt
+		ret=$?
+		if [ $ret -eq 0 ]; then
+		    break
+		fi
+	    done
+	    if [ $ret -ne 0 ]; then
+		log echo
+		log echo "oneSIS: Error! Failed to mount NFS root filesystem!"
+		if [ -n "$retry_reboot" ]; then
+		    log echo "oneSIS: Attempting to reboot system and try again"
+		    sleep 3
+		    echo b > /proc/sysrq-trigger
+		    log echo "oneSIS: Error! Failed to reboot node"
+		    log echo "\*\ \ \*\ \ \* Dropping to a shell..."
+		    /bin/ash 2>&1
+		    exit 1
+		fi
+		log echo "\*\ \ \*\ \ \* Dropping to a shell..."
+		/bin/ash 2>&1
+		exit 1
+	    fi
+	else
+	    log echo "oneSIS: Error! No root partition specified!"
+	    log echo "\*\ \ \*\ \ \* Dropping to a shell..."
+	    /bin/ash 2>&1
+	    exit 1	
+	fi
+    fi
+
+    fi  # end of lustreroot/nfsroot block
+ 
+log echo "oneSIS: rjh: 1"
+
+    # Check if labelled partitions should be mounted
+    mountlabels=`grep "^[[:space:]]*AUTOMOUNT" /etc/initramfs.conf`
+    if [ -n "$mountlabels" ]; then
+	# Mounted all labelled partitions
+	mount_all_labels
+    fi
+
+log echo "oneSIS: rjh: 2"
+
+    # Mount devfs
+    usedevfs=`grep "^[[:space:]]*USE_DEVFS" /etc/initramfs.conf`
+    if [ -n "$usedevfs" ]; then
+	have_devfs=`cat /proc/filesystems |grep devfs`
+	if [ -n "$have_devfs" ]; then
+	    if [ ! -e /mnt/dev/.devfsd ]; then
+		log echo "oneSIS: Mounting devfs on /dev"
+		log mount -n -t devfs devfs /mnt/dev
+	    fi
+	fi
+    fi
+
+log echo "oneSIS: rjh: 3"
+
+    # Check if swap partitions should be turned on
+    swapon=`grep "^[[:space:]]*SWAPON" /etc/initramfs.conf`
+    if [ -n "$swapon" ]; then
+	# Enable all swap partitions
+	for swap in `echo $(fdisk -l |grep swap |awk '{print $1}')`; do
+	    log echo oneSIS: Enabling swap partition: $swap
+	    log swapon /mnt/$swap
+	done
+    fi
+
+log echo "oneSIS: rjh: 4"
+
+    # Tell the kernel not to remount root when we leave the initramfs
+    echo 0x0100 > /proc/sys/kernel/real-root-dev
+
+log echo "oneSIS: rjh: 5"
+
+#########################################################
+########## ANY CUSTOM INITRAMFS LOGIC CAN GO HERE ##########
+#########################################################
+#
+
+cmdline=`cat /proc/cmdline | grep rsyncroot=`
+if [ -n "$cmdline" ]; then
+    rsyncroot=`echo $cmdline|sed -e "s/.* rsyncroot=//" -e "s/ .*//"`
+
+    # see if we're doing rsync:// with a secret
+    RSYNC_PW_OPT=""
+    cmdline=`echo $rsyncroot | grep "rsync://"`
+    if [ -n "$cmdline" ]; then
+        if [ -r /etc/rsyncd.passwd.$cluster ]; then
+            RSYNC_PW_OPT="--password-file=/etc/rsyncd.passwd.$cluster"
+        elif [ -r /etc/rsyncd.passwd ]; then
+            RSYNC_PW_OPT="--password-file=/etc/rsyncd.passwd"
+        else
+            log echo "oneSIS: Error! rsyncroot rsync:// but failed to find a secret file."
+            log echo "\*\ \ \*\ \ \* Dropping to a shell..."
+            /bin/ash 2>&1
+        fi
+    fi
+
+    check_host_up $rsyncroot 20
+
+    log echo "oneSIS: rjh: rsync root is $rsyncroot"
+    log date
+    log rsync -axH $RSYNC_PW_OPT --stats --exclude=init.log  --exclude=lib/modules/ --exclude=usr/share/doc/ --delete $rsyncroot/ /
+
+    # need to repeat this 'cos we've just trashed /, so the passwd file in the initramfs is gone ->
+
+    # see if we're doing rsync:// with a secret
+    RSYNC_PW_OPT=""
+    cmdline=`echo $rsyncroot | grep "rsync://"`
+    if [ -n "$cmdline" ]; then
+        if [ -r /etc/rsyncd.passwd.$cluster ]; then
+            RSYNC_PW_OPT="--password-file=/etc/rsyncd.passwd.$cluster"
+        elif [ -r /etc/rsyncd.passwd ]; then
+            RSYNC_PW_OPT="--password-file=/etc/rsyncd.passwd"
+        else
+            log echo "oneSIS: Error! rsyncroot rsync:// but failed to find a secret file."
+            log echo "\*\ \ \*\ \ \* Dropping to a shell..."
+            /bin/ash 2>&1
+        fi
+    fi
+
+    log rsync -axH $RSYNC_PW_OPT --stats --delete $rsyncroot/lib/modules/`uname -r`/ /lib/modules/`uname -r`/
+    log date
+
+    # mv the mptsas drivers out of the way for a quick boot...
+    cmdline=`cat /proc/cmdline | grep mvmptsas`
+    if [ -n "$cmdline" ]; then
+        mv /lib/modules/`uname -r`/kernel/drivers/message/fusion /lib/modules/
+    fi
+fi
+
+
+### configure the node
+##mount -t tmpfs none /ram
+##update-node -r
+## not necessary here, but maybe nice 'cos local disks will appear first
+#log modprobe ahci
+#
+#log echo "oneSIS: rjh: drop all caches -- begin"
+#sync
+#sync
+#echo 3 > /proc/sys/vm/drop_caches
+#log echo "oneSIS: rjh: drop all caches -- end"
+
+
+#
+#########################################################
+    
+log echo "oneSIS: rjh: 6"
+
+    if [ -n "$ramroot" ]; then
+	if [ -e /etc/fstab ]; then
+	    nomount=`grep "^[[:space:]]*NOMOUNT" /etc/initramfs.conf`
+	    if [ -z "$nomount" ]; then
+		log echo oneSIS: Mounting fstab filesystems
+		mount -a
+	    fi
+        fi
+	log echo oneSIS: Entering ramfs root
+	log echo
+	exec /sbin/init
+    else
+log echo "oneSIS: rjh: 7"
+
+	# Determine if we're running as initrd or initramfs
+	if [ -n "`grep /dev/root /proc/mounts |grep ext2`" ]; then
+	    # In initrd -- pivot_root and put the old root in /initrd
+	    log echo oneSIS: Leaving initrd
+	    cd /mnt
+	    log pivot_root . initrd
+	    log umount -n /initrd/proc
+	    log umount -n /initrd/sys
+	    log umount -n /initrd/dev/pts
+	    log umount -n /initrd/dev
+	    
+            # Unmount the initrd and detach from the console
+	    export PATH=/bin:/usr/bin:/sbin:/usr/sbin
+	    exec chroot . sh -c 'umount -n /initrd;' <dev/console >dev/console 2>&1
+	else
+log echo "oneSIS: rjh: 8"
+
+	    # In initramfs -- switch_root to the real root filesystem
+	    log echo oneSIS: Leaving initramfs
+
+log echo "oneSIS: rjh: 9"
+
+	    # Run the init= binary from kernel cmdline if it exists,
+	    # otherwise run /sbin/init
+	    myinit=/sbin/init
+	    cmdline=`cat /proc/cmdline |grep init=`
+	    if [ -n "$cmdline" ]; then
+		# Handle quoted init= parameters
+		if [ -n "`echo $cmdline |grep 'init=\"'`" ]; then
+  		    myinit=`echo $cmdline |sed -e 's/.* init=\(["]\?[^"]\+["]\).*/\1/' -e 's/^["]//' -e 's/["]$//'`
+                elif [ -n "`echo $cmdline |grep init=\'`" ]; then
+  		    myinit=`echo $cmdline |sed -e "s/.* init=\([']\?[^']\+[']\).*/\1/" -e "s/^[']//" -e "s/[']$//"`
+                else
+                    myinit=`echo $cmdline |sed -e "s/.* init=\([^[:space:]]\+\).*/\1/"`
+                fi
+		log echo "oneSIS: Running init=${myinit}"
+	    fi
+	    sleep 1  # Give time to fully print out any messages in case of kernel panic
+
+log echo "oneSIS: rjh: 10"
+#	    log umount -nat rootfs
+log echo "oneSIS: rjh: mount"
+log mount
+log echo "oneSIS: rjh: 11"
+#/bin/ash
+	    log umount -n /proc
+	    log umount -n /sys
+	    log umount -n /dev/pts
+	    log umount -n /dev
+
+log echo "oneSIS: rjh: 12"
+log mount -t tmpfs -o size=100k none /mnt/log
+log cp /init.log /mnt/log/
+log echo "oneSIS: rjh: 13"
+
+	    exec switch_root -c /dev/console /mnt $myinit
+log echo "oneSIS: rjh: 14"
+
+	fi
+    fi
+}
+
+mount_squashfs_root() {
+# Desc: Mounts the root filesystem from a squashfs filename.img 
+# Input: 1) $  path/to/squashfsimagename.img
+    local squashfsimage="$1"
+    mount -n -t squashfs -o ro $1 /mnt
+    if [ $? -ne 0 ]; then
+	log echo
+	log echo "oneSIS: Error! Failed to mount $squashfsimage on /mnt!"
+	log echo "\*\ \ \*\ \ \* Dropping to a shell..."
+	/bin/ash 2>&1
+	exit 1
+    fi
+}
+
+mount_local_root() {
+# Desc: Mounts the root filesystem from a local disk.
+# Input: 1) $  I   block device pathname or disklabel
+
+    local rootpartition="$1"
+    
+    # Die if we don't have a root partition
+    if [ -z "$rootpartition" ]; then
+	log echo
+	log echo "oneSIS: Error! Failed to find a valid root partition!"
+	log echo "\*\ \ \*\ \ \* Dropping to a shell..."
+	/bin/ash 2>&1
+	exit 1
+    fi
+
+    # Mount the root partition -- try ext3 first   ## FIXME
+    echo "oneSIS: Mounting local filesystem: /"
+    # Check if local partitions should be mounted read-write
+    mount_all_rw=`grep "^[[:space:]]*MOUNT_ALL_RW" /etc/initramfs.conf`
+    mount_dir_rw=`grep "^[[:space:]]*MOUNT_RW: /$" /etc/initramfs.conf`
+    if [ -n "$mount_all_rw" -o -n "$mount_dir_rw" ]; then
+	mount -t ext3 -n -o rw $rootpartition /mnt
+    else
+	mount -t ext3 -n -o ro $rootpartition /mnt
+    fi
+    if [ $? -ne 0 ]; then
+	if [ -n "$mount_all_rw" -o -n "$mount_dir_rw" ]; then
+	    mount -n -o rw $rootpartition /mnt
+	else
+	    mount -n -o ro $rootpartition /mnt
+	fi
+    fi
+    if [ $? -ne 0 ]; then
+	log echo
+	log echo "oneSIS: Error! Failed to mount local root filesystem!"
+	log echo "\*\ \ \*\ \ \* Dropping to a shell..."
+	/bin/ash 2>&1
+	exit 1
+    fi
+}
+
+
+mount_all_labels() {
+# Desc: Mounts all partitions with disk labels unless configured not to
+#       If a filesystem is already mounted, it is skipped
+# Input: None
+
+    # Build list of filesystems to mount
+    for part in `grep "[0-9]$" /proc/partitions |awk '{print $4}'`; do
+	disklabel=`e2label /dev/$part 2>/dev/null`
+	if [ $? = 0 -a "X$disklabel" != "X" ]; then
+	    filesystems="$filesystems $disklabel"
+	    disklabel=`echo $disklabel |sed "s|/|_slash_|g"`
+            # build makeshift hash 
+	    eval part_$disklabel=$part
+	fi
+    done
+
+    # Sort filesystems so that top-level directories are mounted first
+    sort_filesystems $filesystems  # populates global variable $sorted
+    
+    # Mount partitions with disklabels 
+    for label in $sorted; do
+	mounted=0
+	for mount in `grep "[0-9]$" /proc/mounts |awk '{print $2}'`; do
+	    if [ $label = $mount ]; then
+		mounted=1
+		break
+	    fi
+	done
+	if [ $mounted = 0 ]; then	    
+	    # Mount the filesystem on its corresponding directory in the rootFS
+	    # Do not mount onto a transformed pathaname
+	    transform_path /mnt $label
+	    if [ $transformed_path != "/mnt$label" ]; then
+		log echo "oneSIS: Notice! Stubbornly refusing to auto-mount $label"
+		log echo "\*\ \ \*\ \ \* The $label directory in the root image is located on or under a"
+		log echo "\*\ \ \*\ \ \* directory that has been transformed by one or more LINKBACK or"
+		log echo "\*\ \ \*\ \ \* LINKDIR directives.  Mounting a partition on this directory may"
+		log echo "\*\ \ \*\ \ \* cause the partition to be 'lost' when the directives are processed."
+		log echo "\*\ \ \*\ \ \* This partition can still be mounted by listing it"
+		log echo "\*\ \ \*\ \ \* in the /etc/fstab file used by this node."
+	    else
+		disklabel=$label
+		disklabel=`echo $disklabel |sed "s|/|_slash_|g"`
+
+                # read partition device name from makeshift hash 
+		part=$(eval "echo \$part_$disklabel")
+
+                # Check if local partitions should be mounted read-write
+		mount_all_rw=`grep "^[[:space:]]*MOUNT_ALL_RW" /etc/initramfs.conf`
+		mount_dir_rw=`grep "^[[:space:]]*MOUNT_RW: $label$" /etc/initramfs.conf`
+
+		# Mount local partition: try ext3 first  ## FIXME
+		if [ -n "$mount_all_rw" -o -n "$mount_dir_rw" ]; then
+		    log echo "oneSIS: Mounting local filesystem read-write: $label"
+		    mount -t ext3 -n -o rw /dev/$part /mnt/$label
+		    if [ $? -ne 0 ]; then
+			mount -n -o rw /dev/$part /mnt/$label
+		    fi
+		else
+		    log echo "oneSIS: Mounting local filesystem: $label"
+		    mount -t ext3 -n -o ro /dev/$part /mnt/$label
+		    if [ $? -ne 0 ]; then
+			mount -n -o ro /dev/$part /mnt/$label
+		    fi
+		fi
+		if [ $? -ne 0 ]; then
+		    log echo
+		    log echo "oneSIS: Error! Failed to mount filesystem: $label"
+		    log echo "\*\ \ \*\ \ \* Dropping to a shell..."
+		    /bin/ash 2>&1
+		    exit 1
+		fi
+	    fi
+	fi
+    done
+}
+
+create_disk_device() {
+# Desc: Creates a device file for the given device name
+#       The major and minor number are determined from /proc/partitions.
+#       TODO:
+#       If devfs is enabled and a normal device name is given,
+#       fall back to using MAKEDEV.
+# Input: 1) $  I   block device pathname
+
+    local device="$1"
+    device=`echo $device |sed "s|^/dev/||"`
+
+    # Determine major and minor number of device
+    major=`cat /proc/partitions |grep "$device\($\| \)" |awk '{print $1}'`
+    minor=`cat /proc/partitions |grep "$device\($\| \)" |awk '{print $2}'`
+
+    # Create leading directory if necessary
+    has_subdir=`echo $device |grep "/"`
+    if [ -n "$has_subdir" ]; then
+	dir=`echo $device |sed "s|\(.*/\).*|\1|"`
+	if [ ! -e "/dev/$dir" ]; then
+	    log mkdir -p /dev/$dir
+	fi
+    fi
+
+    # Make the device file
+    if [ ! -e "/dev/$device" ]; then
+	log mknod /dev/$device b $major $minor
+    fi
+}
+
+sort_filesystems() {
+# Desc: Sort routine to sort nested directories from the top down
+#       ie: '/' should come before '/tmp', and '/usr' before '/usr/local'
+# Input: 1) space-seperated list of directories
+# Returns: sets the global variable 'sorted' to be the sorted list, which is
+#          also a space-seperated list of directories
+
+    local filesystems="$*"
+    sorted=`echo $filesystems | awk '
+    {
+        # Split input into an array and count the elements
+        split($0, dirs)
+        for (i in dirs)
+          count++
+
+        # Sort the array
+        for (idx=2; idx<=count; idx++) {
+            done=0
+            pos=idx-1
+            while (pos>0) {
+                if (index(dirs[pos],dirs[idx]) == 1) {
+                    tmp=dirs[pos]
+                    dirs[pos]=dirs[idx]
+                    dirs[idx]=tmp
+                    idx=pos
+                }
+                pos--
+            }
+        }
+
+        # Print the sorted array
+        for (idx=1; idx<=count; idx++) {
+            printf dirs[idx] " "
+        }
+    }'`
+}
+
+transform_path() {
+# Desc: Finds the valid transformation of a directory path containing possible
+# .default directories.  This routine is the functional equivalent of the
+# oneSIS::transform_path() function.
+# Input: 1) $  I   base pathname
+# Input: 2) $  I   relative pathname to find transformation of
+# Returns: $ sets the global variable 'transformed_path' to be the full
+#            pathname possibly transformed with .default directories
+#          0: on success
+#          1: on error
+    transformed_path="$1"
+    local pathname="$2"
+
+    # Iterate through directory tree, transforming the path if necessary
+    done=0
+    while [ $done = 0 ]; do	
+	local file=`echo $pathname |sed "s|^/\([^/]\+\)\(/\?.*\)|\1|"`
+	local subdir=`echo $pathname |sed "s|^\(/[^/]\+\)\(/\?.*\)|\2|"`
+
+	pathname=$subdir
+        # Determine if file is already a oneSIS link (to /ram)
+	if [ -h "$transformed_path/$file" ]; then
+	    local target=`readlink $transformed_path/$file`
+	    local ramtarget=`echo $target |grep "^/ram/"`
+	    if [ -n $ramtarget ]; then
+		if [ -e "$transformed_path/$file.default" ]; then
+                    # Transform the path element to have a .default extension
+		    transformed_path="$transformed_path/$file.default"
+		elif [ -e "$transformed_path/.$file.default" ]; then
+                    # Transform the path element to have a hidden element
+		    transformed_path="$transformed_path/.$file.default"
+		else
+		    echo "oneSIS: Warning! Path doesn't exist: $transformed_path/$file"
+		    return 1
+		fi
+	    else
+                # Path is a normal link, not a oneSIS (/ram) link
+                # Append un-transformed path element to transformed path
+		transformed_path="$transformed_path/$file"
+	    fi
+	else
+	    if [ -e "$transformed_path/$file" ]; then
+                # Append un-transformed path element to transformed path
+		transformed_path="$transformed_path/$file"
+	    else
+		echo "oneSIS: Warning! Path doesn't exist: $transformed_path/$file"
+		return 1
+	    fi
+	fi
+
+	# Return once the full path has been transformed
+	if [ -z $pathname ]; then
+	    return 0
+	fi
+    done
+}
+
+# arg 1 is an IP to ping in a loop
+# arg 2 is number of times to try...
+check_interface_up() {
+    for f in `seq 0 $2`; do
+       log echo ping $1 attempt $f
+       ping -c 1 $1 && break
+    done
+}
+
+# arg 1 is a string with an IP in it
+# arg 2 is how many times to attempt to ping
+check_host_up()
+{
+    found=0
+
+    # see if a machine to ping has been specified on the kernel boot line
+    cmdline=`cat /proc/cmdline |grep ping=`
+    if [ -n "$cmdline" ]; then
+        ping=`echo $cmdline|sed -e "s/.* ping=//" -e "s/ .*//"`
+        check_interface_up $ping $2
+        return
+    fi
+
+    # parsing $rsyncmodules/rsyncroot/lustreroot/... is a mess
+    # so just grep for gateway in the complex boot args, and hope it'll do
+
+    if [ -n "$GATEWAY" -a "$GATEWAY" != "0.0.0.0" -a "`echo $1 | grep -F $GATEWAY`" != "" ]; then
+        # use GATEWAY if not 0.0.0.0
+        check_interface_up $GATEWAY $2
+        return
+        # ... and a 10.1 version of gateway
+        gwOtherIP="`echo $GATEWAY | sed s/^10.2./10.1./`"
+        if [ "`echo $1 | grep -F $gwOtherIP`" != "" ]; then
+            check_interface_up $gwOtherIP $2
+            return
+        fi
+    elif [ "`echo $1 | grep -F $mybootip`" != "" ]; then
+        # use mybootip instead
+        check_interface_up $mybootip $2
+        return
+    fi
+
+    # hmm... that failed... just guessing here...
+
+    # try just $1
+    check_interface_up $1 $2
+
+    # try just $GATEWAY anyway...
+    check_interface_up $GATEWAY $2
+}
+
+# Run it
+main
+
+

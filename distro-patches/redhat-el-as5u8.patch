@@ -1,0 +1,143 @@
+--- etc/rc.d/rc.sysinit.orig	2012-03-08 18:10:36.000000000 +1100
++++ etc/rc.d/rc.sysinit	2012-03-08 18:56:59.000000000 +1100
+@@ -644,7 +644,8 @@ if [ -z "$fastboot" -a "$READONLY" != "y
+ 	if [ "${RHGB_STARTED}" != "0" -a -w /etc/rhgb/temp/rhgb-console ]; then
+ 		fsck -T -t noopts=_netdev -A $fsckoptions > /etc/rhgb/temp/rhgb-console
+ 	else
+-		fsck -T -t noopts=_netdev -A $fsckoptions
++		ROOTFS=`grep " / " /proc/mounts |grep "^/dev" | awk '{ print $1 }'`
++		fsck -T -A $fsckoptions $ROOTFS
+ 	fi
+ 	rc=$?
+ 	
+@@ -712,29 +713,29 @@ remount_needed() {
+  
+ # Remount the root filesystem read-write.
+ update_boot_stage RCmountfs
+-if remount_needed ; then
+-  action $"Remounting root filesystem in read-write mode: " mount -n -o remount,rw /
+-fi
++#if remount_needed ; then
++#  action $"Remounting root filesystem in read-write mode: " mount -n -o remount,rw /
++#fi
+ 
+ # Clean up SELinux labels
+ if [ -n "$SELINUX_STATE" ]; then
+    restorecon /etc/mtab /etc/ld.so.cache /etc/blkid/blkid.tab /etc/resolv.conf >/dev/null 2>&1
+ fi
+ 
+-if [ "$READONLY" != "yes" ] ; then
+-	# Clear mtab
+-	(> /etc/mtab) &> /dev/null
+-
+-	# Remove stale backups
+-	rm -f /etc/mtab~ /etc/mtab~~
+-
+-	# Enter mounted filesystems into /etc/mtab
+-	mount -f /
+-	mount -f /proc >/dev/null 2>&1
+-	mount -f /sys >/dev/null 2>&1
+-	mount -f /dev/pts >/dev/null 2>&1
+-	mount -f /proc/bus/usb >/dev/null 2>&1
+-fi
++#if [ "$READONLY" != "yes" ] ; then
++#	# Clear mtab
++#	(> /etc/mtab) &> /dev/null
++#
++#	# Remove stale backups
++#	rm -f /etc/mtab~ /etc/mtab~~
++#
++#	# Enter mounted filesystems into /etc/mtab
++#	mount -f /
++#	mount -f /proc >/dev/null 2>&1
++#	mount -f /sys >/dev/null 2>&1
++#	mount -f /dev/pts >/dev/null 2>&1
++#	mount -f /proc/bus/usb >/dev/null 2>&1
++#fi
+ 
+ # Mount all other filesystems (except for NFS and /proc, which is already
+ # mounted). Contrary to standard usage,
+@@ -835,34 +836,34 @@ if [ -f /.unconfigured ]; then
+ fi
+ 
+ # Clean out /.
+-rm -f /fastboot /fsckoptions /forcefsck /.autofsck /forcequotacheck /halt \
+-	/poweroff /.suspended &> /dev/null
++#rm -f /fastboot /fsckoptions /forcefsck /.autofsck /forcequotacheck /halt \
++#	/poweroff /.suspended &> /dev/null
+ 
+ # Do we need (w|u)tmpx files? We don't set them up, but the sysadmin might...
+ _NEED_XFILES=
+ [ -f /var/run/utmpx -o -f /var/log/wtmpx ] && _NEED_XFILES=1
+ 
+-# Clean up /var.  I'd use find, but /usr may not be mounted.
+-for afile in /var/lock/* /var/run/* ; do
+-	if [ -d "$afile" ]; then
+-	   case "$afile" in
+-		*/news|*/mon)	;;
+-		*/sudo)		rm -f $afile/*/* ;;
+-		*/vmware)	rm -rf $afile/*/* ;;
+-		*/samba)	rm -rf $afile/*/* ;;
+-		*/screen)	rm -rf $afile/* ;;
+-		*/cvs)		rm -rf $afile/* ;;
+-		*/dovecot)	rm -f $afile/* $afile/*/* 2>/dev/null ;;
+-		*/cups)		rm -f $afile/*/* ;;
+-		*/libvirt)	rm -rf $afile/*/* ;;
+-		*)		rm -f $afile/* ;;
+-	   esac
+-	else
+-	   rm -f $afile
+-	fi
+-done
+-rm -f /var/lib/rpm/__db* &> /dev/null
+-rm -f /var/gdm/.gdmfifo &> /dev/null
++## Clean up /var.  I'd use find, but /usr may not be mounted.
++#for afile in /var/lock/* /var/run/* ; do
++#	if [ -d "$afile" ]; then
++#	   case "$afile" in
++#		*/news|*/mon)	;;
++#		*/sudo)		rm -f $afile/*/* ;;
++#		*/vmware)	rm -rf $afile/*/* ;;
++#		*/samba)	rm -rf $afile/*/* ;;
++#		*/screen)	rm -rf $afile/* ;;
++#		*/cvs)		rm -rf $afile/* ;;
++#		*/dovecot)	rm -f $afile/* $afile/*/* 2>/dev/null ;;
++#		*/cups)		rm -f $afile/*/* ;;
++#		*/libvirt)	rm -rf $afile/*/* ;;
++#		*)		rm -f $afile/* ;;
++#	   esac
++#	else
++#	   rm -f $afile
++#	fi
++#done
++#rm -f /var/lib/rpm/__db* &> /dev/null
++#rm -f /var/gdm/.gdmfifo &> /dev/null
+ 
+ # Reset pam_console permissions
+ [ -x /sbin/pam_console_apply ] && /sbin/pam_console_apply -r
+@@ -883,11 +884,11 @@ fi
+ 
+ # Clean up various /tmp bits
+ [ -n "$SELINUX_STATE" ] && restorecon /tmp
+-rm -f /tmp/.X*-lock /tmp/.lock.* /tmp/.gdm_socket /tmp/.s.PGSQL.*
+-rm -rf /tmp/.X*-unix /tmp/.ICE-unix /tmp/.font-unix /tmp/hsperfdata_* \
+-       /tmp/kde-* /tmp/ksocket-* /tmp/mc-* /tmp/mcop-* /tmp/orbit-*  \
+-       /tmp/scrollkeeper-*  /tmp/ssh-* \
+-       /dev/.in_sysinit
++#rm -f /tmp/.X*-lock /tmp/.lock.* /tmp/.gdm_socket /tmp/.s.PGSQL.*
++#rm -rf /tmp/.X*-unix /tmp/.ICE-unix /tmp/.font-unix /tmp/hsperfdata_* \
++#       /tmp/kde-* /tmp/ksocket-* /tmp/mc-* /tmp/mcop-* /tmp/orbit-*  \
++#       /tmp/scrollkeeper-*  /tmp/ssh-* \
++#       /dev/.in_sysinit
+ 
+ # Make ICE directory
+ mkdir -m 1777 -p /tmp/.ICE-unix >/dev/null 2>&1
+@@ -943,7 +944,7 @@ fi
+ dmesg -s 131072 > /var/log/dmesg
+ 
+ # create the crash indicator flag to warn on crashes, offer fsck with timeout
+-touch /.autofsck &> /dev/null
++#touch /.autofsck &> /dev/null
+ 
+ if [ "$PROMPT" != no ]; then
+     while :; do

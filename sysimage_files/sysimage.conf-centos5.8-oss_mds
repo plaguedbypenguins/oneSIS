@@ -1,0 +1,395 @@
+####-----------------------------------------------------------------------####
+# example oneSIS configuration file.
+#
+# This config is more complex than the typical setup.
+# It is trying to show an example of how to use each type of directive.
+#
+# For more information on configuration directives/syntax, refer to the
+# oneSIS Administrator's manual: http://onesis.sourceforge.net/docs.html 
+####-----------------------------------------------------------------------####
+
+####-----------------------------------------------------------------------####
+# DISTRO: <name> <version>                                                    #
+
+DISTRO: RedHat-EL-AS5u8
+
+####-----------------------------------------------------------------------####
+
+####-----------------------------------------------------------------------####
+# INCLUDE: <path>                                                             #
+
+####-----------------------------------------------------------------------####
+
+####-----------------------------------------------------------------------####
+# NODECLASS_REGEXP: <perl_regexp> <CLASS>                                     #
+# NODECLASS_MAP: <NODE> <CLASS>                                               #
+# NODECLASS_RANGE: <prefix[RANGE]...suffix> <CLASS>                           #
+#                  RANGE can be of the form [a-b,x-y,...], where a<b and x<y  #
+
+# VU
+NODECLASS_REGEXP: hamster\d+gige vu.oss
+NODECLASS_REGEXP: hamster\d+     vu.oss
+NODECLASS_REGEXP: marmot\d+gige  vu.mds
+NODECLASS_REGEXP: marmot\d+      vu.mds
+
+NODECLASS_REGEXP: vu-test      vu
+NODECLASS_REGEXP: vu-testgige  vu
+NODECLASS_REGEXP: gopher4      vu
+NODECLASS_REGEXP: gopher4gige  vu
+NODECLASS_REGEXP: roffle       vu
+NODECLASS_REGEXP: rofflegige   vu
+NODECLASS_RANGE: v[1489-1492]  vu
+
+NODECLASS_RANGE: hamster[1-2]gige   vu.oss.pair1
+NODECLASS_RANGE: hamster[1-2]       vu.oss.pair1
+NODECLASS_RANGE: hamster[3-4]gige   vu.oss.pair2
+NODECLASS_RANGE: hamster[3-4]       vu.oss.pair2
+NODECLASS_RANGE: hamster[5-6]gige   vu.oss.pair3
+NODECLASS_RANGE: hamster[5-6]       vu.oss.pair3
+NODECLASS_RANGE: hamster[7-8]gige   vu.oss.pair4
+NODECLASS_RANGE: hamster[7-8]       vu.oss.pair4
+NODECLASS_RANGE: hamster[9-10]gige  vu.oss.pair5
+NODECLASS_RANGE: hamster[9-10]      vu.oss.pair5
+NODECLASS_RANGE: hamster[11-12]gige vu.oss.pair6
+NODECLASS_RANGE: hamster[11-12]     vu.oss.pair6
+NODECLASS_RANGE: hamster[13-14]gige vu.oss.pair7
+NODECLASS_RANGE: hamster[13-14]     vu.oss.pair7
+NODECLASS_RANGE: hamster[15-16]gige vu.oss.pair8
+NODECLASS_RANGE: hamster[15-16]     vu.oss.pair8
+NODECLASS_RANGE: hamster[17-18]gige vu.oss.pair9
+NODECLASS_RANGE: hamster[17-18]     vu.oss.pair9
+NODECLASS_RANGE: hamster[19-20]gige vu.oss.pair10
+NODECLASS_RANGE: hamster[19-20]     vu.oss.pair10
+NODECLASS_RANGE: hamster[21-22]gige vu.oss.pair11
+NODECLASS_RANGE: hamster[21-22]     vu.oss.pair11
+NODECLASS_RANGE: hamster[23-24]gige vu.oss.pair12
+NODECLASS_RANGE: hamster[23-24]     vu.oss.pair12
+NODECLASS_RANGE: hamster[25-26]gige vu.oss.pair13
+NODECLASS_RANGE: hamster[25-26]     vu.oss.pair13
+
+NODECLASS_RANGE: marmot[1-2]gige vu.mds.pair1
+NODECLASS_RANGE: marmot[1-2]     vu.mds.pair1
+NODECLASS_RANGE: marmot[3-4]gige vu.mds.pair2
+NODECLASS_RANGE: marmot[3-4]     vu.mds.pair2
+
+# XE
+NODECLASS_REGEXP: sox\d+     xe.oss
+NODECLASS_REGEXP: xemds\d+      xe.mds
+NODECLASS_REGEXP: xrouter\d+	xe.router.10g
+
+# this would have been neater and pair1,pair2 etc. if the raid namespaces had been separate
+NODECLASS_MAP: sox1       xe.oss.sox1
+NODECLASS_MAP: sox2       xe.oss.sox2
+NODECLASS_MAP: sox3       xe.oss.sox3
+NODECLASS_MAP: sox4       xe.oss.sox4
+NODECLASS_MAP: sox5       xe.oss.sox5
+NODECLASS_MAP: sox6       xe.oss.sox6
+NODECLASS_MAP: sox7       xe.oss.sox7
+NODECLASS_MAP: sox8       xe.oss.sox8
+
+NODECLASS_RANGE: xemds[1-2]     xe.mds.pair1
+
+# Al-Kindi
+NODECLASS_REGEXP: kmds\d+(|-gige)  alkindi.mds
+NODECLASS_REGEXP: koss\d+(|-gige)  alkindi.oss
+NODECLASS_REGEXP: knet0\d(|-gige)  alkindi.router.ib
+NODECLASS_REGEXP: knet1\d(|-gige)  alkindi.router.10g
+
+NODECLASS_REGEXP: koss0[01](|-gige)  alkindi.oss.pair1
+NODECLASS_REGEXP: koss0[23](|-gige)  alkindi.oss.pair2
+NODECLASS_REGEXP: koss0[45](|-gige)  alkindi.oss.pair3
+NODECLASS_REGEXP: koss0[67](|-gige)  alkindi.oss.pair4
+NODECLASS_REGEXP: koss0[89](|-gige)  alkindi.oss.pair5
+
+NODECLASS_REGEXP: knfs\d+(|-gige)  alkindi.nfs
+
+####-----------------------------------------------------------------------####
+
+####-----------------------------------------------------------------------####
+# PROPERTY: <propname> [-c CLASS[,CLASS]...] [-n NODE[,NODE]...]              #
+#                      [-r RANGE] [-re REGEXP]                                #
+
+####-----------------------------------------------------------------------####
+
+PROPERTY: vu.odd -r hamster[1,3,5,7,9,11,13,15,17,19,21,23,25]
+PROPERTY: vu.odd -r hamster[1,3,5,7,9,11,13,15,17,19,21,23,25]gige
+PROPERTY: vu.even -r hamster[2,4,6,8,10,12,14,16,18,20,22,24,26]
+PROPERTY: vu.even -r hamster[2,4,6,8,10,12,14,16,18,20,22,24,26]gige
+
+PROPERTY: xe.odd  -r sox[1,3,5,7]
+PROPERTY: xe.even -r sox[2,4,6,8]
+
+PROPERTY: alkindi.odd  -re koss\d[13579](|-gige)
+PROPERTY: alkindi.even -re koss\d[02468](|-gige)
+#PROPERTY: alkindi.router.ib  -re knet0\d(|-gige)
+#PROPERTY: alkindi.router.10g -re knet1\d(|-gige)
+
+####-----------------------------------------------------------------------####
+# SERVICE: <name> -c CLASS[,CLASS]... -n NODE[,NODE]...                       #
+
+####-----------------------------------------------------------------------####
+
+SERVICE gmond_ibstats -c xe
+
+SERVICE gmond_sensors -c vu
+SERVICE pcie_check    -c vu
+# needs to be started by hand 'cos OSTs aren't mounted @ boot:
+#SERVICE ost_stats     -c vu
+
+SERVICE opensmd       -c alkindi.mds -n xemds2
+SERVICE multipathd    -c alkindi
+
+####-----------------------------------------------------------------------####
+# RAMSIZE: <max_size [k|m|g]> [-c CLASS[,CLASS]...] [-n NODE[,NODE]...]       #
+#                             [-p PROPERTY[,PROPERTY]...]                     #
+
+RAMSIZE: 100m
+
+####-----------------------------------------------------------------------####
+
+####-----------------------------------------------------------------------####
+# RAMDIR:  <dir>  [-d] [-p] [-m mode] [-u user] [-g group]                    #
+#                 [-c CLASS[,CLASS]...] [-n NODE[,NODE]...]                   #
+#                 [-p PROPERTY[,PROPERTY]...]                                 #
+# RAMFILE: <file> [-d]      [-m mode] [-u user] [-g group]                    #
+#                 [-c CLASS[,CLASS]...] [-n NODE[,NODE]...]                   #
+#                 [-p PROPERTY[,PROPERTY]...]                                 #
+
+####-----------------------------------------------------------------------####
+
+####-----------------------------------------------------------------------####
+# LINKDIR:  <dir>  [-d] [-p] [-c CLASS[,CLASS]...] [-n NODE[,NODE]...]        #
+#                            [-p PROPERTY[,PROPERTY]...]                      #
+# LINKFILE: <file> [-d]      [-c CLASS[,CLASS]...] [-n NODE[,NODE]...]        #
+#                            [-p PROPERTY[,PROPERTY]...]                      #
+
+####-----------------------------------------------------------------------####
+
+# pretty standard as you'd expect:
+LINKDIR /var/log
+LINKDIR /var/lock/subsys
+LINKFILE /var/lib/random-seed -d
+#LINKDIR /tmp
+LINKDIR /var/lib/ntp
+# copy gmond template into ramdisk so we can modify it
+LINKFILE /etc/ganglia/gmond.conf -d
+#LINKFILE /etc/add-static-routes
+# hmmm - rc.local works the 2nd time with this, but not the first... weird...
+#LINKFILE /etc/sysconfig/network-scripts/ifcfg-ib0
+# some of these are 'cos it's an NFS server which may not be needed in the final config:
+#LINKDIR /var/lib/nfs
+#LINKFILE /etc/mtab
+#LINKFILE /etc/mtab~
+#LINKDIR /var/lib/nfs/rpc_pipefs
+#LINKDIR /var/lib/nfs/statd
+## sm needs a chmod to rpcuser.rpcuser, but I don't know how to do that yet:
+#LINKDIR /var/lib/nfs/statd/sm
+# prob not critical:
+LINKDIR /var/run/netreport
+LINKDIR /var/run/mdadm
+# for module
+LINKFILE /root/.modulesbeginenv
+# for pbs_mom. /var/spool/pbs/ before 2.0(?), move to /var/torque/ for 2.1 etc.
+#LINKDIR /var/spool/pbs/aux
+#LINKDIR /var/spool/pbs/mom_logs
+#LINKDIR /var/spool/pbs/spool
+#LINKDIR /var/spool/pbs/undelivered
+#
+
+LINKFILE /var/lib/logrotate.status
+#LINKDIR /var/tmp
+#LINKFILE /etc/mtab.fuselock
+#LINKDIR /var/lib/nfs
+#LINKDIR /var/lib/nfs/rpc_pipefs
+
+# note - these subdir's need to come before the main dir
+LINKDIR /var/run/dbus
+LINKDIR /var/run/sudo
+
+LINKDIR /var/run
+
+# for centos5
+#LINKFILE /var/lock/irqbalance
+#LINKFILE /var/empty/sshd/etc/localtime
+LINKFILE /etc/adjtime
+#LINKDIR /var/lock/lvm
+#LINKDIR /etc/lvm
+#LINKFILE /etc/lvm/.cache
+#LINKFILE /etc/lvm/.cache.tmp
+#
+## for iscsi
+##LINKFILE /etc/initiatorname.iscsi
+#LINKDIR /var/lock/iscsi
+#LINKDIR /var/lib/iscsi
+#LINKFILE /etc/iscsi/ifaces
+#LINKDIR /etc/iscsi/send_targets
+#LINKDIR /etc/iscsi/nodes
+## postfix
+#LINKDIR /var/spool/postfix/maildrop
+# sendmail
+LINKDIR /var/spool/clientmqueue
+LINKDIR /var/spool/mqueue
+
+# for multipath
+LINKDIR /var/lib/multipath
+LINKDIR /var/cache/multipathd
+
+# for systemtap cache
+LINKDIR /root/.systemtap
+
+# for nscd's caches
+LINKDIR /var/db/nscd
+
+# copy /etc/smartd.default into ramdisk so that it can be modified for the local node
+LINKFILE /etc/smartd.conf -d
+
+# copy a tree to ramdisk for CAM logfiles etc.
+LINKDIR /var/opt/sun/cam/fms -d
+#LINKDIR /opt/sun/cam/private
+
+####-----------------------------------------------------------------------####
+# LINKBACK: <file|dir> [*] <'CLASS'|'NODE'|target> [-h]                       #
+#           [-c CLASS[,CLASS]...] [-n NODE[,NODE]...]                         #
+#           [-p PROPERTY[,PROPERTY]...]                                       #
+
+LINKBACK /etc/mdadm.lustre.conf CLASS
+
+# different vfs_cache_pressure settings for mds and oss
+LINKBACK /etc/sysctl.conf CLASS
+
+# different modprobe.conf settings for mds and oss
+LINKBACK /etc/modprobe.conf CLASS
+LINKBACK /etc/modprobe.conf NODE -n knet10,knet11,xrouter1,xrouter2
+
+LINKBACK /etc/lvm/lvm.conf CLASS -c alkindi
+
+## BONDING for 10g alkindi routers
+LINKBACK /etc/sysconfig/network-scripts/ifcfg-eth2  CLASS -h -c alkindi.router.10g,xe.router.10g
+LINKBACK /etc/sysconfig/network-scripts/ifcfg-eth3  CLASS -h -c alkindi.router.10g
+LINKBACK /etc/sysconfig/network-scripts/ifcfg-bond0 CLASS -h -c alkindi.router.10g
+#LINKBACK /etc/sysconfig/network-scripts/ifcfg-vlan4   NODE  -h -n knet10,knet11
+LINKBACK /etc/sysconfig/network-scripts/ifcfg-vlan102 NODE  -h -n knet10,knet11
+#LINKBACK /etc/sysconfig/network-scripts/ifcfg-vlan105 NODE  -h -n knet10,knet11
+LINKBACK /etc/sysconfig/network-scripts/ifcfg-vlan12  NODE  -h -n knet10,knet11
+
+LINKBACK /etc/sysconfig/network-scripts/ifcfg-ib1 NODE -h -n knet00,knet01
+
+# xe routers
+LINKBACK /etc/sysconfig/network-scripts/ifcfg-eth2_vlan NODE -h -n xrouter1,xrouter2
+
+# customisations because xe is a login node
+# Note the -h here, hide the ifcfg files from network daemon on other nodes
+#LINKBACK /etc/sysconfig/network-scripts/ifcfg-eth1 NODE -h -n xe
+#LINKBACK /etc/sysconfig/network NODE -n xe
+#LINKBACK /etc/hosts NODE -n xe
+#LINKBACK /etc/hosts.allow NODE -n xe
+#LINKBACK /etc/hosts.deny NODE -n xe
+#LINKBACK /etc/motd NODE -n xe
+
+# note - this is still useful so that the vu-pbs image can have link trickery
+# and see the outside world for yum updates etc. ->
+LINKBACK /etc/resolv.conf NODE -n xe
+
+# mostly so swap can be on different devices
+LINKBACK /etc/fstab CLASS
+
+# xemds has different disks
+#LINKBACK /etc/smartd.conf NODE -n xemds
+# need pbs mom_priv dirs to be r/w for core dumps and jobs/ files
+#  - need to make these dirs in rc.local too
+#LINKBACK /var/spool/pbs/mom_priv /var/spool/pbs/mom_privs/$NODE -f
+
+## allow different ttyS's on Sun nodes
+#LINKBACK /sbin/agetty.sh CLASS
+
+# i/o stats for md's
+LINKBACK /etc/ganglia/conf.d/diskstat.pyconf PROPERTY -p vu.odd,vu.even,xe.odd,xe.even
+LINKBACK /etc/ganglia/conf.d/diskstat.pyconf NODE -n marmot1,marmot2,marmot3,marmot4,xemds1,xemds2
+
+# multi-interface stats
+LINKBACK /etc/ganglia/conf.d/multi_interface.pyconf CLASS -c alkindi.router.10g
+
+## for XE
+#LINKBACK /etc/sysconfig/network-scripts/ifcfg-ib0 NODE -h
+
+# allow different ttyS's on Sun nodes
+LINKBACK /sbin/agetty.sh CLASS
+
+# partial list of extra files to handle multiple clusters in one image ->
+# ie. these contain something about the cluster's identity
+LINKBACK /etc/ldap.conf CLASS -c vu,xe,alkindi
+LINKBACK /etc/openldap/ldap.conf CLASS -c vu,xe,alkindi
+LINKBACK /etc/mail/sendmail.cf CLASS -c vu,xe,alkindi
+LINKBACK /etc/mail/sendmail.mc CLASS -c vu,xe,alkindi
+LINKBACK /etc/mail/submit.cf CLASS -c vu,xe,alkindi
+LINKBACK /etc/mail/submit.mc CLASS -c vu,xe,alkindi
+LINKBACK /etc/ntp.conf CLASS -c vu,xe,alkindi
+LINKBACK /etc/ntp/step-tickers CLASS -c vu,xe,alkindi
+LINKBACK /etc/rc.d/rc.local CLASS -c vu,xe,alkindi
+LINKBACK /etc/syslog.conf CLASS -c vu,xe,alkindi
+LINKBACK /etc/rsyncd.passwd CLASS -c vu,xe,alkindi
+LINKBACK /etc/securetty CLASS -c vu,xe,alkindi,alkindi.router,alkindi.nfs
+LINKBACK /etc/security/limits.conf CLASS -c vu,xe,alkindi,alkindi.router
+LINKBACK /root/.ssh/authorized_keys CLASS -c vu,xe,alkindi
+#LINKBACK /etc/ssh/shosts.equiv CLASS -c vu.compute,xe.compute
+#LINKBACK /etc/sysconfig/munge CLASS -c vu.compute,xe.compute
+
+LINKBACK /etc/init.d/gmond CLASS -c vu,xe,alkindi
+
+LINKBACK /etc/ofed/opensm.conf NODE -n kmds00,kmds01,xemds2
+
+LINKBACK /etc/hosts CLASS
+LINKBACK /etc/multipath.conf CLASS -c alkindi
+
+LINKBACK /etc/ofed/ib-node-name-map CLASS -c alkindi
+
+LINKBACK /etc/init.d/ost_stats CLASS -c vu,xe,alkindi
+
+####-----------------------------------------------------------------------####
+
+####-----------------------------------------------------------------------####
+# DISKMOUNT:  <disk> <size[%]> <mointpoint>                                   #
+#             [-c CLASS[,CLASS]...] [-n NODE[,NODE]...]                       #
+#             [-p PROPERTY[,PROPERTY]...]                                     #
+# DISKSWAP: <disk> <size[%]>                                                  #
+#           [-c CLASS[,CLASS]...] [-n NODE[,NODE]...]                         #
+#           [-p PROPERTY[,PROPERTY]...]                                       #
+
+####-----------------------------------------------------------------------####
+
+####-----------------------------------------------------------------------####
+# DEPLOYMOUNT:  <disk> <size[%]> <mointpoint>                                 #
+#               [-c CLASS[,CLASS]...] [-n NODE[,NODE]...]                     #
+#               [-p PROPERTY[,PROPERTY]...]                                   #
+# DEPLOYSWAP: <disk> <size[%]> [-c CLASS[,CLASS]...] [-n NODE[,NODE]...]      #
+#                              [-p PROPERTY[,PROPERTY]...]                    #
+# BOOTLOADER: <grub | lilo>    [-c CLASS[,CLASS]...] [-n NODE[,NODE]...]      #
+#                              [-p PROPERTY[,PROPERTY]...]                    #
+# SYNCDIR:     <path> [-c CLASS[,CLASS]...] [-n NODE[,NODE]...]               #
+#                     [-p PROPERTY[,PROPERTY]...]                             #
+# EXCLUDESYNC: <path> [-c CLASS[,CLASS]...] [-n NODE[,NODE]...]               #
+#                     [-p PROPERTY[,PROPERTY]...]                             #
+
+####-----------------------------------------------------------------------####
+
+####-----------------------------------------------------------------------####
+# ETH_PRELOAD: <driver,[driver]...>                                           #
+# MAC_ADDR: <hostname> <mac_address>                                          #
+
+# rjh; Sat Nov 15 21:10:42 EST 2008
+#  used to use this, but then it became e1000e, and we don't need it
+#  anyway if we're using custom initramfs's...
+#ETH_PRELOAD: e1000
+
+####-----------------------------------------------------------------------####
+
+####-----------------------------------------------------------------------####
+# CONSOLECMD: [-c CLASS[,CLASS]...] [-n NODE[,NODE]...]                       #
+#             [-p PROPERTY[,PROPERTY]...] <command>                           #
+# POWERCMD: <function> [-c CLASS[,CLASS]...] [-n NODE[,NODE]...]              #
+#                      [-p PROPERTY[,PROPERTY]...] <command>                  #
+#            function can be: ON,OFF,CYCLE,STATUS,LEDON,LEDOFF,LEDSTATUS      #
+# SPECFORMAT: <spec_id> <format> [HOST:/// | IP:///] [SPEC:///]               #
+#            format can be: hostname,ipaddr,basic_range,ext_range             #
+
+####-----------------------------------------------------------------------####

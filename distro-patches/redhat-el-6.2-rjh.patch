@@ -1,0 +1,117 @@
+--- etc/sysconfig/readonly-root.orig	2011-08-16 11:10:34.000000000 -0700
++++ etc/sysconfig/readonly-root	2011-08-16 11:10:53.000000000 -0700
+@@ -1,5 +1,5 @@
+ # Set to 'yes' to mount the system filesystems read-only.
+-READONLY=no
++READONLY=yes
+ # Set to 'yes' to mount various temporary state as either tmpfs
+ # or on the block device labelled RW_LABEL. Implied by READONLY
+ TEMPORARY_STATE=no
+--- etc/rc.d/rc.sysinit.orig	2011-08-16 11:11:57.000000000 -0700
++++ etc/rc.d/rc.sysinit	2011-08-16 11:12:07.000000000 -0700
+@@ -252,7 +252,7 @@
+ 	READONLY=no
+ fi
+ 
+-if [ "$READONLY" = "yes" -o "$TEMPORARY_STATE" = "yes" ]; then
++if [ "$yes" = "no" ]; then
+ 
+ 	mount_empty() {
+ 		if [ -e "$1" ]; then
+@@ -581,7 +581,7 @@
+ 
+ # Clean up /var.
+ rm -rf /var/lock/cvs/* /var/run/screen/*
+-find /var/lock /var/run ! -type d -exec rm -f {} \;
++find /var/lock/ /var/run/ ! -type d -exec rm -f {} \;
+ rm -f /var/lib/rpm/__db* &> /dev/null
+ rm -f /var/gdm/.gdmfifo &> /dev/null
+ 
+--- etc/init/rcS.conf.orig	2012-01-14 13:27:21.000000000 +1100
++++ etc/init/rcS.conf	2012-01-14 13:29:25.000000000 +1100
+@@ -13,6 +13,8 @@ task
+ # without information so that it defaults to previous=N runlevel=S.
+ console output
+ pre-start script
++	/sbin/rc.preinit --run --exec "/bin/echo oneSIS: preinit complete"
++
+ 	for t in $(cat /proc/cmdline); do
+ 		case $t in
+ 			emergency)
+--- etc/init.d/halt.orig	2012-01-16 00:17:58.000000000 +1100
++++ etc/init.d/halt	2012-01-16 00:20:32.000000000 +1100
+@@ -106,11 +106,18 @@ action $"Saving random seed: " dd if=/de
+ 
+ [ -x /sbin/hwclock -a -e /dev/rtc ] && action $"Syncing hardware clock to system time" /sbin/hwclock --systohc
+ 
++halfroot=`cat /proc/cmdline | grep " halfroot "`
++lustreroot=`cat /proc/cmdline | grep " lustreroot"`
++if [ -z "$halfroot" ]; then
++  # rjh - don't do this 'cos /ram is umounted which causes problems.
++
+ # Try to unmount tmpfs filesystems to avoid swapping them in.  Ignore failures.
+ tmpfs=$(awk '$2 ~ /^\/($|proc|dev)/ { next; }
+ 	     $3 == "tmpfs" { print $2; }' /proc/mounts | sort -r)
+ [ -n "$tmpfs" ] && fstab-decode $UMOUNT $tmpfs 2>/dev/null
+ 
++fi
++
+ # Turn off swap, then unmount file systems.
+ [ -f /proc/swaps ] && SWAPS=$(awk '! /^Filename/ { print $1 }' /proc/swaps)
+ if [ -n "$SWAPS" ]; then
+@@ -138,6 +144,9 @@ __umount_loop '$3 ~ /^rpc_pipefs$/ || $3
+     $"Unmounting pipe file systems (retry): " \
+     -f
+ 
++if [ -z "$halfroot" -a -z "$lustreroot" ]; then
++  # rjh - we have nothing that's r/w left that we care about anyway, so don't do this loop:
++
+ LANG=C __umount_loop '$2 ~ /^\/$|^\/proc|^\/dev/{next}
+ 	$3 == "tmpfs" || $3 == "proc" {print $2 ; next}
+ 	$3 ~ /(loopfs|autofs|nfs|cifs|smbfs|ncpfs|sysfs)/ {next}
+@@ -147,6 +156,8 @@ LANG=C __umount_loop '$2 ~ /^\/$|^\/proc
+ 	$"Unmounting file systems (retry): " \
+ 	-f
+ 
++fi
++
+ [ -f /proc/bus/usb/devices ] && $UMOUNT /proc/bus/usb
+ 
+ [ -f /etc/crypttab ] && halt_crypto
+@@ -154,6 +165,9 @@ LANG=C __umount_loop '$2 ~ /^\/$|^\/proc
+ # remove the crash indicator flag
+ rm -f /.autofsck
+ 
++if [ -z "$halfroot" -a -z "$lustreroot" ]; then
++  # rjh              
++
+ # Try all file systems other than root, essential filesystems and RAM disks,
+ # one last time.
+ awk '$2 !~ /\/(|dev|proc|selinux|sys)$/ && $1 !~ /^\/dev\/ram/ { print $2 }' \
+@@ -162,6 +176,8 @@ awk '$2 !~ /\/(|dev|proc|selinux|sys)$/ 
+     fstab-decode $UMOUNT -f $line
+ done
+ 
++fi
++
+ if [ -x /sbin/halt.local ]; then
+    /sbin/halt.local
+ fi
+@@ -169,12 +185,17 @@ fi
+ # Tell init to re-exec itself.
+ kill -TERM 1
+ 
++if [ -z "$halfroot" -a -z "$lustreroot" ]; then
++  # rjh              
++
+ # Remount read only anything that's left mounted.
+ # echo $"Remounting remaining filesystems readonly"
+ mount | awk '{ print $1,$3 }' | while read dev dir; do
+     fstab-decode mount -n -o ro,remount $dev $dir
+ done
+ 
++fi
++
+ # If we left mdmon's running wait for the raidsets to become clean
+ if [ -n "$OMITARGS" ]; then
+     mdadm --wait-clean --scan

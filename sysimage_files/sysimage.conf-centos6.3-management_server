@@ -1,0 +1,335 @@
+####-----------------------------------------------------------------------####
+# example oneSIS configuration file.
+#
+# This config is more complex than the typical setup.
+# It is trying to show an example of how to use each type of directive.
+#
+# For more information on configuration directives/syntax, refer to the
+# oneSIS Administrator's manual: http://onesis.sourceforge.net/docs.html 
+####-----------------------------------------------------------------------####
+
+####-----------------------------------------------------------------------####
+# DISTRO: <name> <version>                                                    #
+
+DISTRO: RedHat-EL-6.2-rjh-rw
+
+####-----------------------------------------------------------------------####
+
+####-----------------------------------------------------------------------####
+# INCLUDE: <path>                                                             #
+
+####-----------------------------------------------------------------------####
+
+####-----------------------------------------------------------------------####
+# NODECLASS_REGEXP: <perl_regexp> <CLASS>                                     #
+# NODECLASS_MAP: <NODE> <CLASS>                                               #
+# NODECLASS_RANGE: <prefix[RANGE]...suffix> <CLASS>                           #
+#                  RANGE can be of the form [a-b,x-y,...], where a<b and x<y  #
+
+NODECLASS_REGEXP: dummy\d+ vu
+NODECLASS_REGEXP: r-pbs r
+NODECLASS_REGEXP: r-man\d+ r
+
+####-----------------------------------------------------------------------####
+
+####-----------------------------------------------------------------------####
+# PROPERTY: <propname> [-c CLASS[,CLASS]...] [-n NODE[,NODE]...]              #
+#                      [-r RANGE] [-re REGEXP]                                #
+
+####-----------------------------------------------------------------------####
+
+
+####-----------------------------------------------------------------------####
+# SERVICE: <name> -c CLASS[,CLASS]... -n NODE[,NODE]...                       #
+
+####-----------------------------------------------------------------------####
+
+SERVICE xinetd   -n r-pbs
+#SERVICE mysqld   -n r-pbs  # not just yet
+SERVICE dhcpd    -n r-pbs
+#SERVICE opensm   -n r-pbs # tmp
+# tmp not now - problems at boot:
+#SERVICE conman   -n r-pbs # tmp
+#SERVICE slapd    -n r-pbs # need this very soon
+#SERVICE dhcpd_ib -n r-pbs  # not just yet
+# tmp not now - problems at boot:
+#SERVICE powerman -n r-pbs,r-man2
+#SERVICE conman   -n r-man2  # not just yet
+#SERVICE slapd    -n r-man2,r-man3  # not just yet
+#SERVICE opensm   -n r-man4,r-man5  # not just yet
+SERVICE gmetad   -n r-man4,r-man6
+SERVICE httpd    -n r-man6
+
+####-----------------------------------------------------------------------####
+# RAMSIZE: <max_size [k|m|g]> [-c CLASS[,CLASS]...] [-n NODE[,NODE]...]       #
+#                             [-p PROPERTY[,PROPERTY]...]                     #
+
+RAMSIZE: 100m
+
+####-----------------------------------------------------------------------####
+
+####-----------------------------------------------------------------------####
+# RAMDIR:  <dir>  [-d] [-p] [-m mode] [-u user] [-g group]                    #
+#                 [-c CLASS[,CLASS]...] [-n NODE[,NODE]...]                   #
+#                 [-p PROPERTY[,PROPERTY]...]                                 #
+# RAMFILE: <file> [-d]      [-m mode] [-u user] [-g group]                    #
+#                 [-c CLASS[,CLASS]...] [-n NODE[,NODE]...]                   #
+#                 [-p PROPERTY[,PROPERTY]...]                                 #
+
+####-----------------------------------------------------------------------####
+
+####-----------------------------------------------------------------------####
+# LINKDIR:  <dir>  [-d] [-p] [-c CLASS[,CLASS]...] [-n NODE[,NODE]...]        #
+#                            [-p PROPERTY[,PROPERTY]...]                      #
+# LINKFILE: <file> [-d]      [-c CLASS[,CLASS]...] [-n NODE[,NODE]...]        #
+#                            [-p PROPERTY[,PROPERTY]...]                      #
+
+####-----------------------------------------------------------------------####
+
+# pretty standard as you'd expect:
+#LINKDIR /var/log
+#LINKDIR /var/lock/subsys
+#LINKFILE /var/lib/random-seed -d
+#LINKDIR /tmp
+LINKDIR /var/lib/ntp
+# copy gmond template into ramdisk so we can modify it
+LINKFILE /etc/ganglia/gmond.conf -d
+#LINKFILE /etc/add-static-routes
+# hmmm - rc.local works the 2nd time with this, but not the first... weird...
+#LINKFILE /etc/sysconfig/network-scripts/ifcfg-ib0
+# some of these are 'cos it's an NFS server which may not be needed in the final config:
+#LINKDIR /var/lib/nfs
+#LINKFILE /etc/mtab
+#LINKFILE /etc/mtab~
+#LINKDIR /var/lib/nfs/rpc_pipefs
+#LINKDIR /var/lib/nfs/statd
+## sm needs a chmod to rpcuser.rpcuser, but I don't know how to do that yet:
+#LINKDIR /var/lib/nfs/statd/sm
+# prob not critical:
+# for module
+LINKFILE /root/.modulesbeginenv
+# for pbs_mom. /var/spool/pbs/ before 2.0(?), move to /var/torque/ for 2.1 etc.
+#LINKDIR /var/spool/pbs/aux
+#LINKDIR /var/spool/pbs/mom_logs
+#LINKDIR /var/spool/pbs/spool
+#LINKDIR /var/spool/pbs/undelivered
+#
+
+#LINKFILE /var/lib/logrotate.status
+#LINKDIR /var/tmp
+#LINKFILE /etc/mtab.fuselock
+#LINKDIR /var/lib/nfs
+#LINKDIR /var/lib/nfs/rpc_pipefs
+
+## note - these subdir's need to come before the main dir
+#LINKDIR /var/run/dbus
+#LINKDIR /var/db/sudo
+
+#LINKDIR /var/run/netreport
+#LINKDIR /var/run/mdadm
+#LINKDIR /var/run/nslcd
+
+LINKDIR /var/run -d
+LINKDIR /var/lock -d
+
+# for centos5
+#LINKFILE /var/lock/irqbalance
+#LINKFILE /var/empty/sshd/etc/localtime
+LINKFILE /etc/adjtime
+#LINKDIR /var/lock/lvm
+#LINKDIR /etc/lvm
+#LINKFILE /etc/lvm/.cache
+#LINKFILE /etc/lvm/.cache.tmp
+#
+## for iscsi
+##LINKFILE /etc/initiatorname.iscsi
+#LINKDIR /var/lock/iscsi
+#LINKDIR /var/lib/iscsi
+#LINKFILE /etc/iscsi/ifaces
+#LINKDIR /etc/iscsi/send_targets
+#LINKDIR /etc/iscsi/nodes
+## postfix
+#LINKDIR /var/spool/postfix/maildrop
+# sendmail
+#LINKDIR /var/spool/clientmqueue
+#LINKDIR /var/spool/mqueue
+
+## for multipath
+#LINKDIR /var/lib/multipath
+#LINKDIR /var/cache/multipathd
+
+# for systemtap cache
+LINKDIR /root/.systemtap
+
+# copy /etc/smartd.default into ramdisk so that it can be modified for the local node
+LINKFILE /etc/smartd.conf -d
+
+# copy a tree to ramdisk for CAM logfiles etc.
+#LINKDIR /var/opt/sun/cam/fms -d
+#LINKDIR /opt/sun/cam/private
+
+# for nscd's caches
+#LINKDIR /var/db/nscd
+
+LINKDIR /var/lib/readahead
+
+
+####-----------------------------------------------------------------------####
+# LINKBACK: <file|dir> [*] <'CLASS'|'NODE'|target> [-h]                       #
+#           [-c CLASS[,CLASS]...] [-n NODE[,NODE]...]                         #
+#           [-p PROPERTY[,PROPERTY]...]                                       #
+
+LINKBACK /etc/sysconfig/network-scripts/ifcfg-ib0    NODE -h
+LINKBACK /etc/sysconfig/network-scripts/ifcfg-eth0   NODE -h  # int
+LINKBACK /etc/sysconfig/network-scripts/ifcfg-eth1   NODE -h  # ext
+LINKBACK /etc/sysconfig/network-scripts/ifcfg-eth0:0 NODE -h  # bmcview
+# tmp: - ldap,syslog on r-pbs
+LINKBACK /etc/sysconfig/network-scripts/ifcfg-eth1:0 NODE -h -n r-pbs,r-man3,r-man4,r-man5,r-man6  # ldap-ext's, gw-ext's, www
+LINKBACK /etc/sysconfig/network-scripts/ifcfg-ib0:0  NODE -h -n r-pbs,r-man3,r-man4,r-man5         # ldap-int's, gw-int's
+LINKBACK /etc/sysconfig/network-scripts/ifcfg-ib0:1  NODE -h -n r-pbs  # syslog
+LINKBACK /etc/sysconfig/network-scripts/ifcfg-eth0:1 NODE -h -n r-pbs  # syslog gige
+LINKBACK /etc/sysconfig/network-scripts/ifcfg-eth0:2 NODE -h -n r-pbs  # syslog bmc
+# real:
+#LINKBACK /etc/sysconfig/network-scripts/ifcfg-eth1:0 NODE -h -n r-man2,r-man3,r-man4,r-man5,r-man6  # ldap-ext's, gw-ext's, www
+#LINKBACK /etc/sysconfig/network-scripts/ifcfg-ib0:0  NODE -h -n r-man2,r-man3,r-man4,r-man5         # ldap-int's, gw-int's
+#LINKBACK /etc/sysconfig/network-scripts/ifcfg-ib0:1  NODE -h -n r-man3  # syslog
+#LINKBACK /etc/sysconfig/network-scripts/ifcfg-eth0:1 NODE -h -n r-man3  # syslog gige
+#LINKBACK /etc/sysconfig/network-scripts/ifcfg-eth0:2 NODE -h -n r-man3  # syslog bmc
+# ntp - tmp. should be on man2,3
+LINKBACK /etc/sysconfig/network-scripts/ifcfg-ib0:2  NODE -h -n r-pbs  # ntp1
+LINKBACK /etc/sysconfig/network-scripts/ifcfg-ib0:3  NODE -h -n r-pbs  # ntp2
+LINKBACK /etc/sysconfig/network-scripts/ifcfg-eth0:3 NODE -h -n r-pbs  # ntp1 gige
+LINKBACK /etc/sysconfig/network-scripts/ifcfg-eth0:4 NODE -h -n r-pbs  # ntp2 gige
+LINKBACK /etc/sysconfig/network-scripts/ifcfg-eth0:5 NODE -h -n r-pbs  # ntp1 bmc
+LINKBACK /etc/sysconfig/network-scripts/ifcfg-eth0:6 NODE -h -n r-pbs  # ntp2 bmc
+
+# note - this is still useful so that the vu-pbs image can have link trickery
+# and see the outside world for yum updates etc. ->
+#LINKBACK /etc/resolv.conf NODE -n xe
+
+LINKBACK /etc/resolv.conf CLASS
+LINKBACK /root/.bash_history NODE
+LINKBACK /var/lib/random-seed NODE
+
+# xemds has different disks
+#LINKBACK /etc/smartd.conf NODE -n xemds
+# need pbs mom_priv dirs to be r/w for core dumps and jobs/ files
+#  - need to make these dirs in rc.local too
+#LINKBACK /var/spool/pbs/mom_priv /var/spool/pbs/mom_privs/$NODE -f
+
+## allow different ttyS's on Sun nodes
+#LINKBACK /sbin/agetty.sh CLASS
+
+## i/o stats for md's
+#LINKBACK /etc/ganglia/conf.d/diskstat.pyconf PROPERTY -p vu.odd,vu.even,xe.odd,xe.even
+#LINKBACK /etc/ganglia/conf.d/diskstat.pyconf NODE -n marmot1,marmot2,marmot3,marmot4,xemds1,xemds2
+
+# multi-interface stats
+#LINKBACK /etc/ganglia/conf.d/multi_interface.pyconf CLASS -c alkindi.router.10g
+
+## for XE
+#LINKBACK /etc/sysconfig/network-scripts/ifcfg-ib0 NODE -h
+
+# allow different ttyS's on Sun nodes
+#LINKBACK /sbin/agetty.sh CLASS
+
+# partial list of extra files to handle multiple clusters in one image ->
+# ie. these contain something about the cluster's identity
+LINKBACK /etc/nslcd.conf CLASS
+LINKBACK /etc/openldap/ldap.conf CLASS
+LINKBACK /etc/pam_ldap.conf CLASS
+LINKBACK /etc/ntp.conf CLASS
+LINKBACK /etc/ntp/step-tickers CLASS
+LINKBACK /etc/rc.d/rc.local CLASS
+LINKBACK /etc/rsyslog.conf CLASS
+
+# tmp for bringup:
+LINKBACK /etc/rsyslog.conf NODE -n r-pbs
+# real:
+#LINKBACK /etc/rsyslog.conf NODE -n r-man3
+
+#LINKBACK /etc/rsyncd.passwd CLASS -c vu,r
+#LINKBACK /etc/securetty CLASS -c vu,r
+#LINKBACK /etc/security/limits.conf CLASS -c vu,r
+LINKBACK /root/.ssh/authorized_keys CLASS
+#LINKBACK /etc/ssh/shosts.equiv CLASS -c vu.compute,xe.compute
+#LINKBACK /etc/sysconfig/munge CLASS -c vu.compute,xe.compute
+#LINKBACK /etc/init.d/gmond CLASS
+
+# not this. priority in sysconfig now.
+#LINKBACK /etc/rdma/opensm.conf NODE -n r-man4,r-man5
+
+# tmp
+LINKBACK /etc/sysconfig/opensm NODE -n r-pbs,r-man5
+# real:
+#LINKBACK /etc/sysconfig/opensm NODE -n r-man4,r-man5
+
+#LINKBACK /etc/rdma/ib-node-name-map CLASS
+
+# r TODO ->
+
+#LINKBACK /etc/mail/sendmail.cf CLASS -c vu,r
+#LINKBACK /etc/mail/sendmail.mc CLASS -c vu,r
+#LINKBACK /etc/mail/submit.cf CLASS -c vu,r
+#LINKBACK /etc/mail/submit.mc CLASS -c vu,r
+
+LINKBACK /etc/hosts CLASS
+#LINKBACK /etc/multipath.conf CLASS -c alkindi
+
+LINKBACK /etc/fstab NODE
+
+# tmp for bringup
+LINKBACK /var/lib/ldap NODE -n r-pbs,r-man3
+LINKBACK /etc/openldap/slapd.conf NODE -n r-pbs,r-man3
+# real
+#LINKBACK /var/lib/ldap NODE -n r-man2,r-man3
+#LINKBACK /etc/openldap/slapd.conf NODE -n r-man2,r-man3
+
+####-----------------------------------------------------------------------####
+
+####-----------------------------------------------------------------------####
+# DISKMOUNT:  <disk> <size[%]> <mointpoint>                                   #
+#             [-c CLASS[,CLASS]...] [-n NODE[,NODE]...]                       #
+#             [-p PROPERTY[,PROPERTY]...]                                     #
+# DISKSWAP: <disk> <size[%]>                                                  #
+#           [-c CLASS[,CLASS]...] [-n NODE[,NODE]...]                         #
+#           [-p PROPERTY[,PROPERTY]...]                                       #
+
+####-----------------------------------------------------------------------####
+
+####-----------------------------------------------------------------------####
+# DEPLOYMOUNT:  <disk> <size[%]> <mointpoint>                                 #
+#               [-c CLASS[,CLASS]...] [-n NODE[,NODE]...]                     #
+#               [-p PROPERTY[,PROPERTY]...]                                   #
+# DEPLOYSWAP: <disk> <size[%]> [-c CLASS[,CLASS]...] [-n NODE[,NODE]...]      #
+#                              [-p PROPERTY[,PROPERTY]...]                    #
+# BOOTLOADER: <grub | lilo>    [-c CLASS[,CLASS]...] [-n NODE[,NODE]...]      #
+#                              [-p PROPERTY[,PROPERTY]...]                    #
+# SYNCDIR:     <path> [-c CLASS[,CLASS]...] [-n NODE[,NODE]...]               #
+#                     [-p PROPERTY[,PROPERTY]...]                             #
+# EXCLUDESYNC: <path> [-c CLASS[,CLASS]...] [-n NODE[,NODE]...]               #
+#                     [-p PROPERTY[,PROPERTY]...]                             #
+
+####-----------------------------------------------------------------------####
+
+####-----------------------------------------------------------------------####
+# ETH_PRELOAD: <driver,[driver]...>                                           #
+# MAC_ADDR: <hostname> <mac_address>                                          #
+
+#MAC_ADDR r-pbs 00:19:99:C5:7F:29   # sf2
+MAC_ADDR r-pbs 00:19:99:C5:EE:AA  
+
+ETH_PRELOAD: igb
+
+####-----------------------------------------------------------------------####
+
+####-----------------------------------------------------------------------####
+# CONSOLECMD: [-c CLASS[,CLASS]...] [-n NODE[,NODE]...]                       #
+#             [-p PROPERTY[,PROPERTY]...] <command>                           #
+# POWERCMD: <function> [-c CLASS[,CLASS]...] [-n NODE[,NODE]...]              #
+#                      [-p PROPERTY[,PROPERTY]...] <command>                  #
+#            function can be: ON,OFF,CYCLE,STATUS,LEDON,LEDOFF,LEDSTATUS      #
+# SPECFORMAT: <spec_id> <format> [HOST:/// | IP:///] [SPEC:///]               #
+#            format can be: hostname,ipaddr,basic_range,ext_range             #
+
+####-----------------------------------------------------------------------####
