@@ -1,14 +1,18 @@
 #!/bin/ash
 
-# change fe80:0000:0000:0000:5080:0200:008d:c095
-# to 50:80:02:00:00:8d:c0:95
+# change eg. fe80:0000:0000:0000:5080:0200:008d:c095
+#   to 50:80:02:00:00:8d:c0:95
 id=`cat /sys/class/infiniband/mlx4_0/ports/1/gids/0 | cut -d: -f5- | sed 's/://g;s/../&:/g;s/:$//'`
 
-# Sun old gPXE option rom has short identifiers regardless of IB fw
+# Sun's old gPXE option rom uses the above short identifiers regardless of IB fw.
+#
+# the below is a crude hack, but our newer IB fw machines have iPXE/Flexboot which
+# uses the longer identifiers, and it seems likely that all subsequent machines will
+# use that too, so special-case the older Sun fw versions.
 fw=`cat /sys/class/infiniband/mlx4_0/fw_ver`
-if [ "$fw" != "2.7.0" -a "$fw" != "2.7.8100" ]; then   # keep short identifier for Sun option rom
-   # change 50:80:02:00:00:8d:c0:95
-   # to ff:00:00:00:00:00:02:00:00:02:c9:00:50:80:02:00:00:8d:c0:95
+if [ "$fw" != "2.7.0" -a "$fw" != "2.7.8100" ]; then
+   # change eg. 50:80:02:00:00:8d:c0:95
+   #   to ff:00:00:00:00:00:02:00:00:02:c9:00:50:80:02:00:00:8d:c0:95
    id="ff:00:00:00:00:00:02:00:00:02:c9:00:"$id
    echo `basename $0` using long dhcp identifier $id
 fi
@@ -21,19 +25,14 @@ echo '}'                                 >> /tmp/d.conf
 echo conf file
 cat /tmp/d.conf
 
-# the below re-try loop is because dhclient can get the wrong reply
-
-# using dhclient from rhel6.2 doesn't help - is the same as .sunhpc2
-# using dhcp server from   ""   ""                      ""   ""
-
-## writing an expired lease file with the right IP in it doesn't help
-#echo 'lease {'                            > /tmp/l.conf
-#echo 'interface "ib0";'                  >> /tmp/l.conf
-#echo "fixed-address $1;"                 >> /tmp/l.conf
-#echo 'renew 4 2012/01/19 04:10:41;'      >> /tmp/l.conf
-#echo 'rebind 4 2012/01/19 05:54:00;'     >> /tmp/l.conf
-#echo 'expire 4 2012/01/19 06:54:00;'     >> /tmp/l.conf
-#echo '}'                                 >> /tmp/l.conf
+# the below re-try loop is because dhclient can get the wrong reply.
+# this is likely due to a non-unique xid bug in iPXE and/or dhclient which
+# violates the DHCP standard www.ietf.org/rfc/rfc2131.txt
+#
+# here we assume that the correct IP is to be found on the kernel command line
+# and has been given to this script as $1. obviously if both the option rom
+# iPXE and this dhclient is broken then the below could loop infinitely, but
+# hey, then at least you will know you have a problem with the option rom...
 
 ip="blah"
 cnt=0
@@ -41,7 +40,6 @@ cnt=0
 while [ "$ip" != "$1" ]; do
    echo TRY $cnt
    rm -f /tmp/lease
-   #cp /tmp/l.conf /tmp/lease
 
    /sbin/dhclient -cf /tmp/d.conf -lf /tmp/lease ib0
 
@@ -51,7 +49,7 @@ while [ "$ip" != "$1" ]; do
    echo lease file
    cat /tmp/lease
 
-   # check IP dhcp gave us matches the IP we know we reall are
+   # check IP dhcp gave us matches the IP we know we really are
    #  eg. fixed-address 10.1.16.52; vs. /proc/cmdline's 10.1.16.52
    ip=`grep fixed-address /tmp/lease | tail -1 | cut -d\; -f1 | awk '{print $2}'`
    h=`grep host /tmp/lease | tail -1 | cut -d\" -f2`
@@ -60,15 +58,8 @@ while [ "$ip" != "$1" ]; do
 
    sleep 1
    pid=`ps w | grep /sbin/dhclient | grep -v grep | awk '{print $1}'`
-   #echo pid $pid
-   #echo kill
    kill $pid
    sleep 1
-   #echo ps
-   #ps w | grep dhc
-   #sleep 1
-   #echo ps
-   #ps w | grep dhc
 
    let cnt=cnt+1
 done
