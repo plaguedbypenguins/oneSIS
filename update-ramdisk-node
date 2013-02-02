@@ -1,0 +1,173 @@
+#!/bin/sh
+
+# (c) Robin Humble 2009
+# licensed under the GPLv3 or later
+
+# run this script on a oneSIS client node to update its OS ramdisk image.
+
+# firstly read /proc/cmdline to figure out how we were booted using oneSIS and
+# update the ramdisk portions (if any) of this node's OS to be current.
+#
+# after the OS files are updated we then automatically run 'update-node' to
+# reconfig the oneSIS setup to the latest version in the OS image.
+#
+# this script understands: rsyncroot, halfroot (a tweak on pure lustreroot)
+
+forceroot=""
+if [ $# -gt 1 ]; then
+   forceroot=$1
+   shift
+fi
+
+if [ $# -ne 1 ]; then
+   echo "Usage: `basename $0` [root-image-location] dry-run|commit" >&2
+   exit 1
+fi
+
+case "$1" in
+   dry-run)
+      debug=1
+      dryrun=--dry-run
+      echo running in --dry-run mode
+      ;;
+   commit)
+      debug=0
+      dryrun=
+      ;;
+   *)
+      echo "Usage: `basename $0` dry-run|commit" >&2
+      exit 1
+      ;;
+esac
+
+# see if we're doing rsync:// with a secret
+RSYNC_PW_OPT=""
+cmdline=`cat /proc/cmdline | grep "rsync://"`
+forcerootline=`echo $forceroot | grep "rsync://"`
+if [ -n "$cmdline" -o -n "$forcerootline" ]; then
+   if [ -r /etc/rsyncd.passwd ]; then
+      RSYNC_PW_OPT="--password-file=/etc/rsyncd.passwd"
+   else
+      echo "Error! rsync:// found, but failed to find a secret file."
+      exit 1
+   fi
+fi
+
+# determine if we are running on a full 'rsyncroot' node, or on a 'halfroot' node
+
+# find out which root-on-ramdisk image we are by parsing the boot line
+cmdline1=`cat /proc/cmdline |grep ' rsyncroot='`
+cmdline2=`cat /proc/cmdline |grep ' halfroot '`
+if [ -n "$cmdline1" -a -z "$cmdline2" ]; then
+   # check that root is on a ramdisk, otherwise we might be trying to run this on the wrong node
+   # expect just the one line for a tmpfs root:  "rootfs on / type rootfs (rw)"
+   if [ `mount | grep ' / ' | wc -l` -ne 1 ]; then
+      echo root is not on a ramdisk. bye bye
+      exit 1
+   fi
+   if [ `mount | grep ' / ' | cut -d' ' -f1` != "rootfs" ]; then
+      echo root is not on a ramdisk. bye bye
+      exit 1
+   fi
+
+   if [ "$forceroot" = "" ]; then
+      # eg.
+      #  rsyncroot=10.7.10.242:/var/lib/oneSIS/centos-5.2-minimal-lustre-1.6.6/
+      # or
+      #  rsyncroot=rsync://boot@10.7.10.242:/images/centos-5.2-minimal-lustre-1.6.6/
+      root=`echo $cmdline1|sed -e "s/.* rsyncroot=//" -e "s/ .*//"`
+      if [ -z "$root" ]; then
+         echo cannot parse rsyncroot in /proc/cmdline - exiting
+         exit 1
+      fi
+   else
+      root=$forceroot
+   fi
+
+   # dirty hack for r nodes that booted over 10.10 gige but then shutdown gige and use 10.9 IPoIB
+   cluster=`cat /proc/cmdline | sed -e "s/.* cluster=//" -e "s/ .*//"`
+   if [ "$cluster" = "r" -a "`echo $root | grep @10.10.`" != "" ]; then
+      if [ "`ifconfig 2>&1 | grep 10.10`" = "" ]; then # no 10.10 up
+         root=`echo $root | sed 's/@10.10/@10.9/'`
+      fi
+   fi
+
+   # rsync over any changes
+   rsync -avxHS $RSYNC_PW_OPT $dryrun --exclude=init.log --exclude=/root/ --exclude=/lib/modules/ --exclude=/usr/share/doc --exclude=/mnt/ --exclude=/tmp/ --exclude=/ram/ --exclude=/etc/aliases.db --exclude=/var/log.default/wtmp --exclude=/var/run.default/utmp --exclude=/usr/java/jdk1.5.0_16/demo/ --exclude=/usr/java/jdk1.5.0_16/sample/ --exclude=/dev/ --exclude=/etc/blkid.tab --exclude=/etc/lvm/cache/ --exclude=/etc/lvm/archive/ --exclude=/etc/lvm/backup --delete $root/ /
+   rsync -avxHS $RSYNC_PW_OPT $dryrun --delete $root/lib/modules/`uname -r`/ /lib/modules/`uname -r`/
+
+   # update oneSIS links if they've changed
+   if [ $debug -eq 1 ]; then
+      echo dry-run update-node:
+      update-node -d
+   else
+      update-node -r
+   fi
+
+elif [ -n "$cmdline2" -a -z "$cmdline1" ]; then
+   cmdline=`cat /proc/cmdline |grep ' lustreroot='`
+   if [ -z "$cmdline" ]; then
+      echo halfroot but no lustreroot. confused. bye bye
+      exit 1
+   fi
+
+   # check that root is on a ramdisk, otherwise we might be trying to run this on the wrong node
+   # expect 2 lines eg.
+   #   rootfs on / type rootfs (rw)
+   #   none on / type ramfs (rw)
+   if [ `mount | grep ' / ' | wc -l` -ne 2 ]; then
+      echo root is not on a ramdisk. bye bye
+      exit 1
+   fi
+   if [ `mount | grep ' / ' | cut -d' ' -f1 | head -1` != "rootfs" ]; then
+      echo root is not on a ramdisk - rootfs. bye bye
+      exit 1
+   fi
+   if [ `mount | grep ' / ' | cut -d' ' -f1 | tail -1` != "none" -o `mount | grep ' / ' | cut -d' ' -f5 | tail -1` != "ramfs" ]; then
+      echo root is not on a ramdisk - ramfs. bye bye
+      exit 1
+   fi
+
+   # we expect the 3rd mount entry to point at the rootfs on lustre. eg.
+   #   10.8.30.244@o2ib:10.8.30.245@o2ib:/system on /whenPenguins/ruledTheEarth type lustre (ro)              # compute
+   #   10.8.30.244@o2ib:10.8.30.245@o2ib:/system on /whenPenguins/ruledTheEarth type lustre (ro,localflock)   # front-end
+   if [ "`mount | head -3 | tail -1 | cut -d' ' -f5-`" = "lustre (ro)" -o "`mount | head -3 | tail -1 | cut -d' ' -f5-`" = "lustre (ro,localflock)" -o "`mount | head -3 | tail -1 | cut -d' ' -f5-`" = "lustre (ro,relatime,localflock)" -o "`mount | head -3 | tail -1 | cut -d' ' -f5-`" = "lustre (ro,nosuid,relatime,localflock)" ]; then
+      continue
+   else
+      echo 3rd mount is not the read-only root on lustre
+      exit 1
+   fi
+   root=`mount | head -3 | tail -1 | cut -d' ' -f3`
+
+   # check that eg. /usr is linked to this
+   if [ ! -h /usr ]; then
+      echo /usr is not a symlink
+      exit 1
+   fi
+   if [ `ls -l /usr | awk '{print $11}'` != "$root/usr" ]; then
+      echo root $root and link for /usr do not match
+      exit 1
+   fi
+
+   # rsync over any changes
+   for d in lib64 bin sbin; do
+      echo $d
+      # a couple more checks...
+      if [ ! -d /$d ]; then
+         echo $d is not a real directory
+         exit 1
+      fi
+      df1=`df /$d | tail -1 | awk '{print $1}'`
+      df6=`df /$d | tail -1 | awk '{print $6}'`
+      if [ $df1 != "none" -o $df6 != "/" ]; then
+         echo $d not on ramfs
+      fi
+
+      # go..
+      rsync -avxHS $dryrun --delete $root/$d/ /$d/
+   done
+
+else
+   echo no rsyncroot or halfroot in /proc/cmdline - exiting
+   exit 1
+fi
