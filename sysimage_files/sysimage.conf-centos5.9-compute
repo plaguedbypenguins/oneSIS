@@ -75,7 +75,7 @@ PROPERTY: global -r v[1-1200]
 PROPERTY: gpu -r x[1-2,6,11-16] -n d43
 
 # xe 2-disk md jobfs
-PROPERTY: md -r x[104-120]
+PROPERTY: md -r x[108-120]
 
 ####-----------------------------------------------------------------------####
 # SERVICE: <name> -c CLASS[,CLASS]... -n NODE[,NODE]...                       #
